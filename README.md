@@ -17,7 +17,13 @@ Currently included are:
 ## Python scripts:
 
  - **build_scalms.py** :  Build unit cells of liquid metal alloys on a simple cubic grid (bulk, slab and cluster possible)
+ - **built_adsorbates.py** : Place adsorbate atoms or molecules on or in surface slabs. Positions and rotations can be controlled by input files.
+
+## Bash scripts
+
+ - **ml_long.sh** : Do VASP machine learning force field on-the-fly learning trajectories for arbitrary long times, even if the calculation cluster has a walltime limit.
 
 ## Fortran proggrams:
+
  - **analyze_scalms** : Analyze trajectories of liquid metal surface or bulk simulations
 
