@@ -16,6 +16,7 @@ Currently included are:
 
 ## Python scripts:
 
+ - **modify_poscar.py** : Perform several simple operations on a POSCAR file, such as shifting its atoms, multiply the cel, transform from cartesian to internal coordinates and the other way round
  - **build_scalms.py** :  Build unit cells of liquid metal alloys on a simple cubic grid (bulk, slab and cluster possible)
  - **built_adsorbates.py** : Place adsorbate atoms or molecules on or in surface slabs. Positions and rotations can be controlled by input files.
 
@@ -26,4 +27,5 @@ Currently included are:
 ## Fortran proggrams:
 
  - **analyze_scalms** : Analyze trajectories of liquid metal surface or bulk simulations
+ - **partial_dos** : Extract the partial density of states for certain atoms, elements or orbitals from a DOSCAR file
 
