@@ -153,11 +153,11 @@ with poscar_in as infile:
 def trans_frac2cart(xyz,natoms,a_vec,b_vec,c_vec):
    xyz_cart = np.zeros((natoms,3))
    for i in range(natoms):
-      xyz_cart[i][0]=(xyz[i][0]*a_vec[0]+xyz[i][1]*a_vec[1]+\
-                     xyz[i][2]*a_vec[2])*sys_scale
-      xyz_cart[i][1]=(xyz[i][0]*b_vec[0]+xyz[i][1]*b_vec[1]+\
-                     xyz[i][2]*b_vec[2])*sys_scale
-      xyz_cart[i][2]=(xyz[i][0]*c_vec[0]+xyz[i][1]*c_vec[1]+\
+      xyz_cart[i][0]=(xyz[i][0]*a_vec[0]+xyz[i][1]*b_vec[0]+\
+                     xyz[i][2]*c_vec[0])*sys_scale
+      xyz_cart[i][1]=(xyz[i][0]*a_vec[1]+xyz[i][1]*b_vec[1]+\
+                     xyz[i][2]*c_vec[1])*sys_scale
+      xyz_cart[i][2]=(xyz[i][0]*a_vec[2]+xyz[i][1]*b_vec[2]+\
                      xyz[i][2]*c_vec[2])*sys_scale
 
    return xyz_cart
@@ -166,14 +166,32 @@ def trans_frac2cart(xyz,natoms,a_vec,b_vec,c_vec):
 def trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec):
    xyz_frac = np.zeros((natoms,3))
    act_vec = np.zeros((3))
+   vec_mat=np.zeros((3,3))    
+#
+#   Build direct from cartesian coordinates by inverting the 
+#   unit cell vector matrix and multiplying it to the coordinate vector
+#
 
+   vec_mat[0][0]=a_vec[0]
+   vec_mat[1][0]=a_vec[1]
+   vec_mat[2][0]=a_vec[2]
+   vec_mat[0][1]=b_vec[0]
+   vec_mat[1][1]=b_vec[1]
+   vec_mat[2][1]=b_vec[2]
+   vec_mat[0][2]=c_vec[0]
+   vec_mat[1][2]=c_vec[1]
+   vec_mat[2][2]=c_vec[2]
+
+   mat_inv=np.linalg.inv(vec_mat)
+   
    for i in range(natoms):      
-      act_vec[0]=xyz[i][0]
-      act_vec[1]=xyz[i][1]
-      act_vec[2]=xyz[i][2]
-      xyz_frac[i][0]=np.dot(act_vec,a_vec/np.linalg.norm(a_vec))
-      xyz_frac[i][1]=np.dot(act_vec,b_vec/np.linalg.norm(b_vec))
-      xyz_frac[i][2]=np.dot(act_vec,c_vec/np.linalg.norm(c_vec))
+      xyz_frac[i][0]=(xyz[i][0]*mat_inv[0][0]+xyz[i][1]*mat_inv[0][1]+\
+                     xyz[i][2]*mat_inv[0][2])*sys_scale
+      xyz_frac[i][1]=(xyz[i][0]*mat_inv[1][0]+xyz[i][1]*mat_inv[1][1]+\
+                     xyz[i][2]*mat_inv[1][2])*sys_scale
+      xyz_frac[i][2]=(xyz[i][0]*mat_inv[2][0]+xyz[i][1]*mat_inv[2][1]+\
+                     xyz[i][2]*mat_inv[2][2])*sys_scale
+
       
    return xyz_frac
 
@@ -202,28 +220,37 @@ if shift_job:
          exit(1)
    
 
+   if selective:
+      select_new=[]
+
    # Perform the actual shifting of the coordinates
    xyz_new=np.zeros((natoms,3))
+   # If cartesian coordinates: translate the coordinates first to direct, then 
+   #  perform the shift, and finally translate it back to cartesian!
    if cartesian:
+      xyz = trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec)
       for i in range(natoms):
          for j in range(3):
-            xyz[i][j] = xyz[i][j] + shift_vec[j]*coord_vec[j]
+            xyz_new[i][j] = xyz[i][j] + shift_vec[j]
             if xyz[i][j] < 0.0:
-               new[i][j] = xyz[i][j] + coord_vec[j]
-            if xyz[i][j] > coord_vec[j]:
-               new[i][j] = xyz[i][j] - coord_vec[j]
-      if selective:
-         select_new.append(coord_select[i])
+               xyz_new[i][j] = xyz_new[i][j] + 1.0
+            if xyz[i][j] > 1.0:
+               xyz_new[i][j] = xyz_new[i][j] - 1.0
+         if selective:
+            select_new.append(coord_select[i])
+      xyz_new = trans_frac2cart(xyz_new,natoms,a_vec,b_vec,c_vec)
+
    else:
       for i in range(natoms):
          for j in range(3):
-            xyz[i][j] = xyz[i][j] + shift_vec[j]
+            xyz_new[i][j] = xyz[i][j] + shift_vec[j]
             if xyz[i][j] < 0.0:
-               new[i][j] = xyz[i][j] + 1.0
+               xyz_new[i][j] = xyz_new[i][j] + 1.0
             if xyz[i][j] > 1.0:
-               new[i][j] = xyz[i][j] - 1.0 
-      if selective:
-         select_new.append(coord_select[i])  
+               xyz_new[i][j] = xyz_new[i][j] - 1.0 
+
+         if selective:
+            select_new.append(coord_select[i])  
    print(" done!\n")
 
 # B: MULTIPLY THE UNITCELL #################################
@@ -234,7 +261,10 @@ if multiply_job:
    for i in range(3):
       ele = int(multiply_list[i])
       mult_vec[i] = ele # adding the element
-   
+#   If the previous job (shift of unit cell) was already done, overwrite the xyz array   
+   if shift_job:
+      xyz=xyz_new
+
 #   First, determine the size and the number of atoms in the new unit cell      
   
    factor=int(mult_vec[0])*int(mult_vec[1])*int(mult_vec[2])
@@ -247,6 +277,8 @@ if multiply_job:
 
 #  Scale the atom coordinates
    xyz_new=np.zeros((natoms,3))
+#  The individual atoms: their elements   
+   names_new=[]
    if selective:
       select_new=[]
    if cartesian:
@@ -265,6 +297,7 @@ if multiply_job:
                    pos_new=pos_new+1
                    if selective:
                       select_new.append(coord_select[pos_old])
+                   names_new.append(names[pos_old])   
          pos_old=pos_old+1
 
 
@@ -281,7 +314,7 @@ if multiply_job:
                    pos_new=pos_new+1
                    if selective:
                       select_new.append(coord_select[pos_old])
-
+                   names_new.append(names[pos_old])
          pos_old=pos_old+1
 
 #   Scale the unit cell vectors
@@ -289,7 +322,8 @@ if multiply_job:
    b_vec=np.multiply(b_vec,mult_vec[1])
    c_vec=np.multiply(c_vec,mult_vec[2])
 
-
+   names=names_new
+   coord_select=select_new
    print(" done!\n")
 # C: TRANSLATE FROM DIRECT TO CARTESIAN ###################################
 if frac2cart:
@@ -297,6 +331,10 @@ if frac2cart:
    if cartesian:
       print(" The POSCAR file already has cartesian coordinates!")
       exit(1)
+#  If one of the previous jobs were done, overwrite the xyz array
+   if shift_job or multiply_job:
+      xyz=xyz_new 
+
    xyz_new=trans_frac2cart(xyz,natoms,a_vec,b_vec,c_vec)
    cartesian=True
    select_new=[]
@@ -312,8 +350,14 @@ if cart2frac:
    print(" Translate struture from cartesian to fractional/direct coordinates...")
    if not cartesian:
       print(" The POSCAR file already has direct coordinates!")
-      exit(1)
+      exit(1)    
+#  If one of the previous jobs were done, overwrite the xyz array
+   if shift_job or multiply_job or frac2cart:
+      xyz=xyz_new
+
+
    xyz_new=trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec)
+
    cartesian=False
    select_new=[]
    if selective:
@@ -322,6 +366,33 @@ if cart2frac:
 
 
    print(" done!\n")
+
+# E: WRITE XYZ FILE #######################################################
+if writexyz:
+   print(" Write structure to xyz file poscar_mod.xyz...")
+#  If no other job has been done before, copy xyz directly to xyz_new
+   if not shift_job and not multiply_job and not frac2cart and not cart2frac:
+      xyz_new=xyz 
+#  If the structure is in direct coordinates, translate it first to cartesian!
+   if (not cartesian):
+      xyz_new=trans_frac2cart(xyz_new,natoms,a_vec,b_vec,c_vec) 
+
+   original_stdout=sys.stdout
+   with open("poscar_mod.xyz","w") as f:
+      sys.stdout = f
+      print(natoms)
+      print(" System converted to xyz by modify_poscar.py")
+      for i in range(natoms):
+         print(names[i],"  ",str(xyz_new[i][0]),"  ",str(xyz_new[i][1]),"  ",
+                    str(xyz_new[i][2]))
+#  Translate the structure back to direct coordinates, for final POSCAR printout          
+   if (not cartesian):
+      xyz_new=trans_cart2frac(xyz_new,natoms,a_vec,b_vec,c_vec)
+
+   sys.stdout=original_stdout
+   print(" done!\n")
+    
+
 
 
 
