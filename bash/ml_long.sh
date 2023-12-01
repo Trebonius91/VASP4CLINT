@@ -565,7 +565,7 @@ do
       spring_num=${#spring_words[@]} 
 
       sed -i '/SPRING_R0/d' ./INCAR
-      echo "SPRING_R0 = ${spring_words[@]:2:spring_num_dum}" >> INCAR
+      echo "SPRING_R0 = ${spring_words[@]:2:spring_num}" >> INCAR
    fi	   
 
 
