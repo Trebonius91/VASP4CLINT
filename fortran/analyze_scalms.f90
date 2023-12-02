@@ -69,10 +69,14 @@ write(*,*) "The following command line arguments can/must be given (with - sign!
 write(*,*) " -reaxff : A ReaxFF xyz trajectory 'dump.xyz' will be analyzed."
 write(*,*) "     here, the box dimensions must be given separately in 'box_dims.dat',"
 write(*,*) "     with the format 'xlen  ylen  zlen' (one line)"
-write(*,*) " -notraj : No file 'trajectory.xyz' shall be written during the analysis."
-write(*,*) " -rdf' : The radial distribution functions of the second component around "
+write(*,*) " -write_traj : The file 'trajectory.xyz' containing all frames of XDATCAR"
+write(*,*) "     shall be written during the analysis."
+write(*,*) " -dens_bins=[number] : Number of bins for element densities (default: 501)"
+write(*,*) " -rdf : The radial distribution functions of the second component around "
 write(*,*) "     the first shall be calculated. Then, also the total number of neighbors "
 write(*,*) "     up to a certain distance will be calculated."
+write(*,*) " -rdf_bins=[number] : Number of bins for RDF evaluation (default: 201)"
+write(*,*) " -rdf_cutoff=[value]: Cutoff for RDF evalulation (default: 8 Angstrom)"
 write(*,*) " -frame_first=[number] : First trajectory frame that shall be evaluated by "
 write(*,*) "     the script (e.g., in order to skip equilibration parts) (default: 1)"
 write(*,*) " -dens_slices=[number] : In how many parts the z-axis shall be divided for "
@@ -114,6 +118,17 @@ do i = 1, command_argument_count()
       write_traj = .false.
    end if
 end do
+!
+!    For bin packing of abundancies/densities along z-axis
+!
+nbins=501
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:11))  .eq. "-dens_bins=") then
+      read(arg(12:),*) nbins
+      write(*,*) "The number of bins for the element density calculation is: ",nbins
+   end if
+end do
 
 
 !
@@ -128,18 +143,34 @@ do i = 1, command_argument_count()
 end do
 
 
-pi=3.141592653589793238
 !
-!    For bin packing of abundancies/densities along z-axis
-!
-nbins = 501
-atom_slices=100
+!    For further settings of rdf calculations 
 !
 !    For RDF calculation
 !
 rdf_bins = 200  ! number of RDF bins 
 rdf_range = 8.d0  ! maximum distance for RDF
 rdf_binsize = rdf_range/rdf_bins
+
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:10))  .eq. "-rdf_bins=") then
+      read(arg(11:),*) rdf_bins
+      write(*,*) "The number of bins for the RDF calculation is: ",rdf_bins
+   end if
+end do
+
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:12))  .eq. "-rdf_cutoff=") then
+      read(arg(13:),*) rdf_range
+      write(*,*) "The cutoff for the RDF calculation will be ",rdf_range," Angstroms"
+   end if
+end do
+
+
+
+pi=3.141592653589793238
 !    
 !    For (optional) diffusion coefficient calculation
 ! 
@@ -253,12 +284,12 @@ end if
 !
 !    Look if the xyz trajectory file shall be written
 !
-write_traj = .true.
+write_traj = .false.
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
-   if (trim(arg)  .eq. "-notraj") then
-      write_traj = .false.
-      write(*,*) "The file 'trajectory.xyz' will not be written!"
+   if (trim(arg)  .eq. "-write_traj") then
+      write_traj = .true.
+      write(*,*) "The file 'trajectory.xyz' will be written!"
    end if        
 end do   
 !

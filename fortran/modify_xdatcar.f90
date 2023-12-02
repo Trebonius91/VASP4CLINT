@@ -21,6 +21,7 @@ real(kind=8),allocatable::xyz(:,:,:),xyz2(:,:,:)
 real(kind=8)::xlen,ylen,zlen
 real(kind=8)::shift_vec(3),act_val,xyz_print(3)
 integer::multiply_vec(3),pick_ind,pos_new,multiply_prod
+integer::frame_first,frame_last
 logical::eval_stat(10)
 logical::shift_cell,multiply_cell,pick_frame,print_xyz
 character(len=120)::a120,cdum,arg
@@ -38,11 +39,15 @@ write(*,*) "    given in direct coordinates. Example: -shift=0.1,0.0,0.2"
 write(*,*) " -multiply=a,b,c : Multiply the unit cell of each frame by some"
 write(*,*) "    replications in each of the coordinate directions. Integers"
 write(*,*) "    must be given as arguments. Example: -multiply=2,2,1"
-write(*,*) " -pick_frame=num : Pick one frame of the XDATCAR file and print"
+write(*,*) " -pick_frame=[number] : Pick one frame of the XDATCAR file and print"
 write(*,*) "    it to a POSCAR file (POSCAR_pick). Example: -pick_frame=283"
-write(*,*) " -print_xyz : Print each frame to a xyz trajectory: xdatcat.xyz"
+write(*,*) " -print_xyz : Print each frame to a xyz trajectory: xdat_mod.xyz"
+write(*,*) " -print_last=[number] : Only print the last [number] frames into "
+write(*,*) "    the ordered file formate" 
 write(*,*) "One or several of these commands can be executed. The ordering"
 write(*,*) " will be the same as the listing of the commands."
+write(*,*) "If one job apart pick_frame is ordered, the trajectory will be "
+write(*,*) " written to XDATCAR_mod or xdat_mod.xyz"
 !
 !    PART A: Read in the command line arguments !!!!!!!!!!!!!!!!
 !
@@ -107,6 +112,22 @@ do i = 1, command_argument_count()
    end if
 end do
 
+!
+!     Only print the last nframes to the trajectory
+!
+frame_last=0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:12))  .eq. "-print_last=") then
+      read(arg(13:),*,iostat=readstat) frame_last
+      if (readstat .ne. 0) then
+         write(*,*)
+         stop "Check the command -print_last=..., something went wrong!"
+         write(*,*)
+      end if
+   end if
+end do
+
 
 if ((.not. shift_cell) .and. (.not. multiply_cell) .and. (.not. pick_frame) .and. &
            &  (.not. print_xyz)) then
@@ -121,10 +142,13 @@ end if
 !
 !    First, determine the number of lines in the XDATCAR file
 !
+write(*,*)
+write(*,*) "Determine number of atoms and frames in XDATCAR..."
 call system("wc -l XDATCAR > xdat_length")
 open(unit=45,file="xdat_length",status="old")
 read(45,*) xdat_lines
 close(45)
+write(*,*) "completed!"
 
 open(unit=14,file="XDATCAR",status="old",iostat=openstat)
 if (openstat .ne. 0) then
@@ -172,6 +196,10 @@ do i=1,nelems
 end do
 
 nframes = (xdat_lines - 7)/(natoms+1)
+!
+!    From the print-last command, determine the first frame to be written
+!
+frame_first=nframes-frame_last+1
 
 allocate(xyz(3,natoms,nframes))
 !
@@ -281,7 +309,7 @@ end if
 if (multiply_cell) then
    eval_stat = .false.
    write(*,'(a,i4,a,i4,a,i4,a)') " Multipy the unit cell of all frames: ",multiply_vec(1), &
-               & "times a, ",multiply_vec(2),"times b, ",multiply_vec(3),"times c"
+               & " times a, ",multiply_vec(2)," times b, ",multiply_vec(3)," times c"
    multiply_prod=multiply_vec(1)*multiply_vec(2)*multiply_vec(3)
    a_vec=a_vec*multiply_vec(1)
    b_vec=b_vec*multiply_vec(2)
@@ -380,11 +408,14 @@ end if
 !
 eval_stat = .false.
 if (print_xyz) then
-   write(*,*) "Write trajectory in xyz format to file xdatcar.xyz"
-   open(unit=34,file="xdatcar.xyz",status="replace")
-   do i=1,nframes
+   write(*,*) "Write trajectory in xyz format to file xdat_mod.xyz"
+   if (frame_last .ne. 0) then
+      write(*,'(a,i10,a)') " Only the last ",frame_last," frames will be written."
+   end if
+   open(unit=34,file="xdat_mod.xyz",status="replace")
+   do i=frame_first,nframes
       do j=1,10
-         if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+         if (real(i)/real(nframes-frame_first) .gt. real(j)*0.1d0) then
             if (.not. eval_stat(j)) then
                write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
                eval_stat(j) = .true.
@@ -405,6 +436,9 @@ if (print_xyz) then
 else 
    if (shift_cell .or. multiply_cell) then
       write(*,*) "Write trajectory in VASP format to file XDATCAR_mod"
+      if (frame_last .ne. 0) then
+         write(*,'(a,i10,a)') " Only the last ",frame_last," frames will be written."
+      end if
       open(unit=34,file="XDATCAR_mod",status="replace")
       write(34,*) "Trajectory written by modify_xdatcar"
       write(34,*) factor
@@ -420,9 +454,9 @@ else
       end do
       write(34,*)
 
-      do i=1,nframes
+      do i=frame_first,nframes
          do j=1,10
-            if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+            if (real(i)/real(nframes-frame_first) .gt. real(j)*0.1d0) then
                if (.not. eval_stat(j)) then
                   write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
                   eval_stat(j) = .true.

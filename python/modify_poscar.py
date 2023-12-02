@@ -255,8 +255,8 @@ if shift_job:
 
 # B: MULTIPLY THE UNITCELL #################################
 if multiply_job:
-   print(" Multiply the unit cell: ",multiply_list[0],"x along a,",multiply_list[1],
-                 "x along b,",multiply_list[2],"x along c ...") 
+   print(" Multiply the unit cell: ",multiply_list[0],"x along a, ",multiply_list[1],
+                 "x along b, ",multiply_list[2],"x along c ...") 
    mult_vec = np.zeros(3)
    for i in range(3):
       ele = int(multiply_list[i])
