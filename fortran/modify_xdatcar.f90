@@ -436,7 +436,7 @@ if (print_xyz) then
    close(34)
    write(*,*) "completed!"
 else 
-   if (shift_cell .or. multiply_cell) then
+   if (shift_cell .or. multiply_cell .or. print_last) then
       write(*,*) "Write trajectory in VASP format to file XDATCAR_mod"
       if (frame_last .ne. 0) then
          write(*,'(a,i10,a)') " Only the last ",frame_last," frames will be written."
