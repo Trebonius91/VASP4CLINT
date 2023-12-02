@@ -9,20 +9,20 @@
 
 program modify_xdatcar
 implicit none 
-integer::i,j,k
+integer::i,j,k,l,m
 integer::readstat,openstat,counter,endl
 integer::natoms,nelems,xdat_lines,nframes
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
 character(len=2),allocatable::el_names_read(:),el_names(:)
-character(len=2),allocatable::at_names(:)
+character(len=2),allocatable::at_names(:),at_names2(:)
 integer,allocatable::el_nums(:)
 real(kind=8)::act_num(3),factor
-real(kind=8),allocatable::xyz(:,:,:)
+real(kind=8),allocatable::xyz(:,:,:),xyz2(:,:,:)
 real(kind=8)::xlen,ylen,zlen
-real(kind=8)::shift_vec(3)
-integer::multiply_vec(3)
+real(kind=8)::shift_vec(3),act_val,xyz_print(3)
+integer::multiply_vec(3),pick_ind,pos_new,multiply_prod
 logical::eval_stat(10)
-logical::shift_cell,multiply_cell
+logical::shift_cell,multiply_cell,pick_frame,print_xyz
 character(len=120)::a120,cdum,arg
 character(len=220)::a220
 character(len=50)::atest
@@ -47,11 +47,12 @@ write(*,*) " will be the same as the listing of the commands."
 !
 !    The coordinate shift vector
 !
+shift_cell=.false.
 shift_vec=0.0d0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:7))  .eq. "-shift=") then
-      read(arg(18:),*,iostat=readstat) shift_vec
+      read(arg(8:),*,iostat=readstat) shift_vec
       shift_cell=.true.
       if (readstat .ne. 0) then
          stop "Check the command -shift=..., something went wrong!"
@@ -61,15 +62,41 @@ end do
 !
 !    The multiplication of unit cells
 !
+multiply_cell=.false.
 multiply_vec=1
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:10))  .eq. "-multiply=") then
-      read(arg(18:),*,iostat=readstat) multiply_vec
+      read(arg(11:),*,iostat=readstat) multiply_vec
       multiply_cell=.true.
       if (readstat .ne. 0) then
          stop "Check the command -multiply=..., something went wrong!"
       end if
+   end if
+end do
+!
+!     Pick a certain frame from the trajectory
+!
+pick_frame=.false.
+pick_ind=0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:12))  .eq. "-pick_frame=") then
+      read(arg(13:),*,iostat=readstat) pick_ind
+      pick_frame=.true.
+      if (readstat .ne. 0) then
+         stop "Check the command -pick_frame=..., something went wrong!"
+      end if
+   end if
+end do
+!
+!     Write the trajectory to a xyz file
+!
+print_xyz=.false.
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:10))  .eq. "-print_xyz") then
+      print_xyz=.true.
    end if
 end do
 
@@ -180,43 +207,13 @@ do i=1,nframes
          do
             if (act_num(k) > 1d0) then
                act_num(k) = act_num(k) - 1d0
-            else
-               exit
-            end if
-         end do
-         do
-            if (act_num(k) < 0d0) then
-!
-!    Special case: move atoms near the lower border to negative values
-!
-!
-               if (act_num(k) >= -0.2d0) then
-                  exit
-               end if
+            else if (act_num(k) < 0.d0) then
                act_num(k) = act_num(k) + 1d0
-            else
+            else 
                exit
             end if
          end do
-!
-!     We assume that the bulk is located in the lower half of the simulation
-!     cell. If atoms go through the lower x-y surface z-values near 1,
-!     move them to values close below zero for better appearance
-!
-
-         if (act_num(k) .gt. 0.9d0) then
-            act_num(k) = act_num(k)-1.d0
-         end if
-
-         if (k .eq. 1) then
-            xyz(k,j,i) = act_num(k)*xlen
-         end if
-         if (k .eq. 2) then
-            xyz(k,j,i) = act_num(k)*ylen
-         end if
-         if (k .eq. 3) then
-            xyz(k,j,i) = act_num(k)*zlen
-         end if
+         xyz(k,j,i)=act_num(k)
       end do
    end do
 end do
@@ -228,5 +225,121 @@ write(*,*) "---------- SETTINGS ---------------------------"
 write(*,*) "Number of atoms in the system:",natoms
 write(*,*) "Number of frames in the trajectory:",nframes
 write(*,*) "-----------------------------------------------"
+write(*,*)
+!
+!     C: Shift the unit cell along a vector
+!
+if (shift_cell) then
+   write(*,'(a,f9.4,a,f9.4,a,f9.4)') "Shift all frames of the XDATCAR along the vector ", &
+             & shift_vec(1),",",shift_vec(2),",",shift_vec(3)
+   do i=1,nframes
+      do j=1,natoms
+         do k=1,3
+            act_val=xyz(k,j,i)+shift_vec(k)
+            do 
+               if (act_val > 1.0d0) then
+                  act_val=act_val-1.0d0
+               else if (act_val < 0.0d0) then
+                  act_val=act_val+1.d0
+               else 
+                  exit
+               end if
+            end do
+         end do
+      end do
+   end do
+   write(*,*) "completed!"
+   write(*,*)
+end if
+!
+!    D: Multiply the unit cell according to given integer tuple
+!
+if (multiply_cell) then
+   write(*,'(a,i4,a,i4,a,i4,a)') "Multipy the unit cell of all frames: ",multiply_vec(1), &
+               & "times a, ",multiply_vec(2),"times b, ",multiply_vec(3),"times c"
+   multiply_prod=multiply_vec(1)*multiply_vec(2)*multiply_vec(3)
+   a_vec=a_vec*multiply_vec(1)
+   b_vec=b_vec*multiply_vec(2)
+   c_vec=c_vec*multiply_vec(3)
+   el_nums=el_nums*multiply_prod
+   allocate(xyz2(3,natoms*multiply_prod,nframes),at_names2(natoms*multiply_prod))
+   do i=1,nframes
+      pos_new=0
+      do j=1,natoms
+         do k=1,multiply_vec(1)
+            do l=1,multiply_vec(2)
+               do m=1,multiply_vec(3)
+                  pos_new=pos_new+1
+                  xyz2(1,pos_new,i)=(xyz(1,j,i)+1.0*real(k))/real(multiply_vec(1))
+                  xyz2(2,pos_new,i)=(xyz(2,j,i)+1.0*real(l))/real(multiply_vec(2))
+                  xyz2(3,pos_new,i)=(xyz(3,j,i)+1.0*real(m))/real(multiply_vec(3))
+                  at_names2(pos_new)=at_names(j)
+               end do
+            end do
+         end do
+      end do
+   end do
+   natoms=natoms*multiply_prod
+
+   write(*,*) "completed!"
+   write(*,*)
+else 
+!
+!    If no multiplication shall be done, simply copy contents of xyz to xyz2
+!
+   allocate(xyz2(3,natoms,nframes))
+   allocate(at_names2(natoms))
+   xyz2=xyz
+   at_names2=at_names
+end if
+!
+!    D: Write structure to XYZ trajectory file
+!      During this, convert coordinates to cartesian!
+!      If not ordered, write a modified XDATCAR file (in direct coordinates) instead
+!
+if (print_xyz) then
+   write(*,*) "Write trajectory in xyz format to file xdatcar.xyz"
+   open(unit=34,file="xdatcar.xyz",status="replace")
+   do i=1,nframes
+      write(34,*) natoms
+      write(34,*) "Trajectory converted from XDATCAR file via modify_xdatcar"
+      do j=1,natoms
+         xyz_print(1)=(xyz2(1,j,i)*a_vec(1)+xyz2(2,j,i)*b_vec(1)+xyz2(3,j,i)*c_vec(1))*factor
+         xyz_print(2)=(xyz2(1,j,i)*a_vec(2)+xyz2(2,j,i)*b_vec(2)+xyz2(3,j,i)*c_vec(2))*factor
+         xyz_print(3)=(xyz2(1,j,i)*a_vec(3)+xyz2(2,j,i)*b_vec(3)+xyz2(3,j,i)*c_vec(3))*factor
+         write(34,*) at_names2(j),xyz_print(:)
+      end do
+   end do
+
+   close(34)
+   write(*,*) "completed!"
+else
+   write(*,*) "Write trajectory in VASP format to file XDATCAR_mod"
+   open(unit=34,file="XDATCAR_mod",status="replace")
+   write(34,*) "Trajectory written by modify_xdatcar"
+   write(34,*) factor
+   write(34,'(3f15.6)') a_vec
+   write(34,'(3f15.6)') b_vec
+   write(34,'(3f15.6)') c_vec
+   do j=1,nelems
+      write(34,'(a,a)',advance="no") el_names(j),"  "
+   end do 
+   write(34,*)
+   do j=1,nelems
+      write(34,'(i6,a)',advance="no") el_nums(j)," "
+   end do
+   write(34,*)
+
+   do i=1,nframes
+      write(34,*) "Direct configuration=  ",i
+      do j=1,natoms
+         write(34,'(3f15.8)') xyz2(:,j,i) 
+      end do
+   end do
+   close(34)
+   write(*,*) "completed!"
+
+end if
+
 
 end program modify_xdatcar        
