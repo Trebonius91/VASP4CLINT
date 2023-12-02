@@ -23,7 +23,7 @@ real(kind=8)::shift_vec(3),act_val,xyz_print(3)
 integer::multiply_vec(3),pick_ind,pos_new,multiply_prod
 integer::frame_first,frame_last
 logical::eval_stat(10)
-logical::shift_cell,multiply_cell,pick_frame,print_xyz
+logical::shift_cell,multiply_cell,pick_frame,print_xyz,print_last
 character(len=120)::a120,cdum,arg
 character(len=220)::a220
 character(len=50)::atest
@@ -115,11 +115,13 @@ end do
 !
 !     Only print the last nframes to the trajectory
 !
+print_last=.false.
 frame_last=0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:12))  .eq. "-print_last=") then
       read(arg(13:),*,iostat=readstat) frame_last
+      print_last=.true.
       if (readstat .ne. 0) then
          write(*,*)
          stop "Check the command -print_last=..., something went wrong!"
@@ -130,7 +132,7 @@ end do
 
 
 if ((.not. shift_cell) .and. (.not. multiply_cell) .and. (.not. pick_frame) .and. &
-           &  (.not. print_xyz)) then
+           &  (.not. print_xyz) .and. (.not. print_last)) then
    write(*,*)
    write(*,*) "Please give at least one of the possible commands!"
    write(*,*)
