@@ -27,6 +27,7 @@ character(len=120)::a120,cdum,arg
 character(len=220)::a220
 character(len=50)::atest
 
+write(*,*)
 write(*,*) "PROGRAM modify_xdatcar: Modification of XDATCAR trajectory"
 write(*,*) " files for arbitrary systems."
 write(*,*) "The file XDATCAR must be present."
@@ -55,7 +56,9 @@ do i = 1, command_argument_count()
       read(arg(8:),*,iostat=readstat) shift_vec
       shift_cell=.true.
       if (readstat .ne. 0) then
+         write(*,*)
          stop "Check the command -shift=..., something went wrong!"
+         write(*,*)
       end if        
    end if
 end do
@@ -70,7 +73,9 @@ do i = 1, command_argument_count()
       read(arg(11:),*,iostat=readstat) multiply_vec
       multiply_cell=.true.
       if (readstat .ne. 0) then
+         write(*,*)
          stop "Check the command -multiply=..., something went wrong!"
+         write(*,*)
       end if
    end if
 end do
@@ -85,7 +90,9 @@ do i = 1, command_argument_count()
       read(arg(13:),*,iostat=readstat) pick_ind
       pick_frame=.true.
       if (readstat .ne. 0) then
+         write(*,*)
          stop "Check the command -pick_frame=..., something went wrong!"
+         write(*,*)
       end if
    end if
 end do
@@ -101,6 +108,13 @@ do i = 1, command_argument_count()
 end do
 
 
+if ((.not. shift_cell) .and. (.not. multiply_cell) .and. (.not. pick_frame) .and. &
+           &  (.not. print_xyz)) then
+   write(*,*)
+   write(*,*) "Please give at least one of the possible commands!"
+   write(*,*)
+   stop
+end if
 
 !
 !    PART B: Read in the XDATCAR file !!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -230,9 +244,18 @@ write(*,*)
 !     C: Shift the unit cell along a vector
 !
 if (shift_cell) then
-   write(*,'(a,f9.4,a,f9.4,a,f9.4)') "Shift all frames of the XDATCAR along the vector ", &
+   eval_stat = .false.
+   write(*,'(a,f9.4,a,f9.4,a,f9.4)') " Shift all frames of the XDATCAR along the vector ", &
              & shift_vec(1),",",shift_vec(2),",",shift_vec(3)
    do i=1,nframes
+      do j=1,10
+         if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+            if (.not. eval_stat(j)) then
+               write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+               eval_stat(j) = .true.
+            end if
+         end if
+      end do
       do j=1,natoms
          do k=1,3
             act_val=xyz(k,j,i)+shift_vec(k)
@@ -245,6 +268,7 @@ if (shift_cell) then
                   exit
                end if
             end do
+            xyz(k,j,i)=act_val
          end do
       end do
    end do
@@ -255,7 +279,8 @@ end if
 !    D: Multiply the unit cell according to given integer tuple
 !
 if (multiply_cell) then
-   write(*,'(a,i4,a,i4,a,i4,a)') "Multipy the unit cell of all frames: ",multiply_vec(1), &
+   eval_stat = .false.
+   write(*,'(a,i4,a,i4,a,i4,a)') " Multipy the unit cell of all frames: ",multiply_vec(1), &
                & "times a, ",multiply_vec(2),"times b, ",multiply_vec(3),"times c"
    multiply_prod=multiply_vec(1)*multiply_vec(2)*multiply_vec(3)
    a_vec=a_vec*multiply_vec(1)
@@ -264,6 +289,14 @@ if (multiply_cell) then
    el_nums=el_nums*multiply_prod
    allocate(xyz2(3,natoms*multiply_prod,nframes),at_names2(natoms*multiply_prod))
    do i=1,nframes
+      do j=1,10
+         if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+            if (.not. eval_stat(j)) then
+               write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+               eval_stat(j) = .true.
+            end if
+         end if
+      end do
       pos_new=0
       do j=1,natoms
          do k=1,multiply_vec(1)
@@ -293,14 +326,71 @@ else
    at_names2=at_names
 end if
 !
+!    E: Pick a frame of the trajectory and print it as POSCAR or xyz file
+!
+if (pick_frame) then
+   if (print_xyz) then
+      write(*,'(a,i10,a)') " Frame ",pick_ind," will be written to file pos_pick.xyz"
+      open(unit=33,file="pos_pick.xyz",status="replace")
+      write(33,*) natoms
+      write(33,'(a,i10,a)') " Frame ",pick_ind," picked from XDATCAR by modify_xdatcar"
+      do j=1,natoms
+         xyz_print(1)=(xyz2(1,j,pick_ind)*a_vec(1)+xyz2(2,j,pick_ind)*b_vec(1)+ &
+                      & xyz2(3,j,pick_ind)*c_vec(1))*factor
+         xyz_print(2)=(xyz2(1,j,pick_ind)*a_vec(2)+xyz2(2,j,pick_ind)*b_vec(2)+ &
+                      & xyz2(3,j,pick_ind)*c_vec(2))*factor
+         xyz_print(3)=(xyz2(1,j,pick_ind)*a_vec(3)+xyz2(2,j,pick_ind)*b_vec(3)+ &
+                      & xyz2(3,j,pick_ind)*c_vec(3))*factor
+         write(34,*) at_names2(j),xyz_print(:)
+      end do
+      close(33)  
+      write(*,*) "completed!"
+      write(*,*)
+   else 
+      write(*,'(a,i10,a)') " Frame ",pick_ind," will be written to file POSCAR_pick"
+      open(unit=33,file="POSCAR_pick",status="replace")
+      write(33,'(a,i10,a)') " Frame ",pick_ind," picked from XDATCAR by modify_xdatcar"
+      write(33,*) factor
+      write(33,'(3f15.6)') a_vec
+      write(33,'(3f15.6)') b_vec
+      write(33,'(3f15.6)') c_vec
+      do j=1,nelems
+         write(33,'(a,a)',advance="no") el_names(j),"  "
+      end do
+      write(33,*)
+      do j=1,nelems
+         write(33,'(i6,a)',advance="no") el_nums(j)," "
+      end do
+      write(33,*)
+
+      write(33,*) "Direct configuration=  ",pick_ind
+      do j=1,natoms
+         write(33,'(3f15.8)') xyz2(:,j,pick_ind)
+      end do
+      close(33)
+      write(*,*) "completed!"
+      write(*,*)
+   end if
+end if 
+!
 !    D: Write structure to XYZ trajectory file
 !      During this, convert coordinates to cartesian!
 !      If not ordered, write a modified XDATCAR file (in direct coordinates) instead
+!      Print nothing if the pick_frame option is chosen
 !
+eval_stat = .false.
 if (print_xyz) then
    write(*,*) "Write trajectory in xyz format to file xdatcar.xyz"
    open(unit=34,file="xdatcar.xyz",status="replace")
    do i=1,nframes
+      do j=1,10
+         if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+            if (.not. eval_stat(j)) then
+               write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+               eval_stat(j) = .true.
+            end if
+         end if
+      end do
       write(34,*) natoms
       write(34,*) "Trajectory converted from XDATCAR file via modify_xdatcar"
       do j=1,natoms
@@ -310,36 +400,48 @@ if (print_xyz) then
          write(34,*) at_names2(j),xyz_print(:)
       end do
    end do
-
    close(34)
    write(*,*) "completed!"
-else
-   write(*,*) "Write trajectory in VASP format to file XDATCAR_mod"
-   open(unit=34,file="XDATCAR_mod",status="replace")
-   write(34,*) "Trajectory written by modify_xdatcar"
-   write(34,*) factor
-   write(34,'(3f15.6)') a_vec
-   write(34,'(3f15.6)') b_vec
-   write(34,'(3f15.6)') c_vec
-   do j=1,nelems
-      write(34,'(a,a)',advance="no") el_names(j),"  "
-   end do 
-   write(34,*)
-   do j=1,nelems
-      write(34,'(i6,a)',advance="no") el_nums(j)," "
-   end do
-   write(34,*)
-
-   do i=1,nframes
-      write(34,*) "Direct configuration=  ",i
-      do j=1,natoms
-         write(34,'(3f15.8)') xyz2(:,j,i) 
+else 
+   if (shift_cell .or. multiply_cell) then
+      write(*,*) "Write trajectory in VASP format to file XDATCAR_mod"
+      open(unit=34,file="XDATCAR_mod",status="replace")
+      write(34,*) "Trajectory written by modify_xdatcar"
+      write(34,*) factor
+      write(34,'(3f15.6)') a_vec
+      write(34,'(3f15.6)') b_vec
+      write(34,'(3f15.6)') c_vec
+      do j=1,nelems
+         write(34,'(a,a)',advance="no") el_names(j),"  "
+      end do 
+      write(34,*)
+      do j=1,nelems
+         write(34,'(i6,a)',advance="no") el_nums(j)," "
       end do
-   end do
-   close(34)
-   write(*,*) "completed!"
+      write(34,*)
 
+      do i=1,nframes
+         do j=1,10
+            if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+               if (.not. eval_stat(j)) then
+                  write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+                  eval_stat(j) = .true.
+               end if
+            end if
+         end do
+
+         write(34,*) "Direct configuration=  ",i
+         do j=1,natoms
+            write(34,'(3f15.8)') xyz2(:,j,i) 
+         end do
+      end do
+      close(34)
+      write(*,*) "completed!"
+   end if
 end if
 
+write(*,*)
+write(*,*) "modify_xdatcar has finished all tasks, goodbye!"
+write(*,*)
 
 end program modify_xdatcar        
