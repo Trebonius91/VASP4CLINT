@@ -879,9 +879,24 @@ if (surf_tension) then
                end if
             end do
                  
-            read(18,*) pres_xx,pres_xy,pres_zx
+            read(18,*,iostat=readstat) pres_xx,pres_xy,pres_zx
+            if (readstat .ne. 0) then
+               pres_xx=0.d0
+               pres_xy=0.d0
+               pres_zx=0.d0
+            end if
             read(18,*) pres_xy,pres_yy,pres_yz
+            if (readstat .ne. 0) then
+               pres_xy=0.d0
+               pres_yy=0.d0
+               pres_yz=0.d0
+            end if
             read(18,*) pres_zx,pres_yz,pres_zz
+            if (readstat .ne. 0) then
+               pres_zx=0.d0
+               pres_yz=0.d0
+               pres_zz=0.d0
+            end if
             pres_tensor(1,1)=pres_xx
             pres_tensor(2,2)=pres_yy
             pres_tensor(3,3)=pres_zz
