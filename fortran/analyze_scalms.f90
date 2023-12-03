@@ -907,6 +907,11 @@ if (surf_tension) then
       tension=0.5d0*zlen*1d-10*tension
       write(*,*) " completed!"
       write(*,*) "The surface tension is (N/m) or (J/m^2)",tension
+      open(unit=45,file="tension_act.dat",status="replace")
+      write(45,*) "# Surface tension of the system (N/m) or (J/m^2)"
+      write(45,*) tension
+      close(45)
+      write(*,*) "File 'tension_act.dat' written."
       write(*,*) 
    end if
 
