@@ -311,7 +311,7 @@ end do
 !    file alltogether!
 !
 skip_xdat = .false.
-if (.not. write_traj .and. surf_tension) then
+if ((.not. write_traj) .and. (.not. calc_diff) .and. (.not. calc_rdf) .and. surf_tension) then
    write(*,*) "The calculation of surface tension was required as only"
    write(*,*) " job and no trajectory shall be written out." 
    write(*,*) "Therefore, the read in of the XDATCAR file will be skipped!"
