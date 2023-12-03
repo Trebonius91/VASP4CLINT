@@ -885,13 +885,13 @@ if (surf_tension) then
                pres_xy=0.d0
                pres_zx=0.d0
             end if
-            read(18,*) pres_xy,pres_yy,pres_yz
+            read(18,*,iostat=readstat) pres_xy,pres_yy,pres_yz
             if (readstat .ne. 0) then
                pres_xy=0.d0
                pres_yy=0.d0
                pres_yz=0.d0
             end if
-            read(18,*) pres_zx,pres_yz,pres_zz
+            read(18,*,iostat=readstat) pres_zx,pres_yz,pres_zz
             if (readstat .ne. 0) then
                pres_zx=0.d0
                pres_yz=0.d0
@@ -1040,27 +1040,29 @@ if (calc_diff) then
 !
 !    Write the trajectory in xyz format (centered to unit cell) to file
 !
-   write(*,*) "Write trajectory centered to unit cell to 'traj_center.xyz' ..."
-   open(unit=17,file="traj_center.xyz",status="replace")
-   eval_stat=.false.
-   do i=1,nframes
-      do j=1,10
-         if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
-            if (.not. eval_stat(j)) then
-               write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
-               eval_stat(j) = .true.
+   if (write_traj) then
+      write(*,*) "Write trajectory centered to unit cell to 'traj_center.xyz' ..."
+      open(unit=17,file="traj_center.xyz",status="replace")
+      eval_stat=.false.
+      do i=1,nframes
+         do j=1,10
+            if (real(i)/real(nframes) .gt. real(j)*0.1d0) then
+               if (.not. eval_stat(j)) then
+                  write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+                  eval_stat(j) = .true.
+               end if
             end if
-         end if
-      end do
+         end do
 
-      write(17,*) natoms
-      write(17,*) "Frame No.",i
-      do j=1,natoms
-         write(17,*) at_names(j), xyz2(:,j,i)
+         write(17,*) natoms
+         write(17,*) "Frame No.",i
+         do j=1,natoms
+            write(17,*) at_names(j), xyz2(:,j,i)
+         end do
       end do
-   end do
-   close(17)
-   write(*,*) " completed!"
+      close(17)
+      write(*,*) " completed!"
+   end if
 !
 !     Calculate the diffusion coefficient by calculating the MSD 
 !     based on the last time step!
