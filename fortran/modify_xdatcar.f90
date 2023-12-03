@@ -201,7 +201,11 @@ nframes = (xdat_lines - 7)/(natoms+1)
 !
 !    From the print-last command, determine the first frame to be written
 !
-frame_first=nframes-frame_last+1
+if (print_last) then
+   frame_first=nframes-frame_last+1
+else 
+   frame_first=1
+end if
 
 allocate(xyz(3,natoms,nframes))
 !
@@ -455,7 +459,6 @@ else
          write(34,'(i6,a)',advance="no") el_nums(j)," "
       end do
       write(34,*)
-
       do i=frame_first,nframes
          do j=1,10
             if (real(i)/real(nframes-frame_first) .gt. real(j)*0.1d0) then
