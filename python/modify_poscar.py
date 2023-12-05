@@ -134,9 +134,9 @@ with poscar_in as infile:
    if (line_parts[0] != "Direct" and line_parts[0] != "direct"  
                 and line_parts[0] != " Direct" and line_parts[0] != " direct"):
       cartesian=True
-      print(" The POSCAR has direct coordinates.")
-   else:
       print(" The POSCAR has cartesian coordinates.")
+   else:
+      print(" The POSCAR has direct coordinates.")
 
    print(" ")
    for i in range(natoms):

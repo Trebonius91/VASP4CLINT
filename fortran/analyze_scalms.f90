@@ -682,12 +682,12 @@ if (calc_rdf) then
             do j=1,el_nums(l)  ! Ni atoms
                do k=1,el_nums(m)  ! Ga atoms
                   if (l .gt. 1) then 
-                     pos1 = xyz(:,sum(el_nums(1:l-1))+j,i+frame_first)
+                     pos1 = xyz(:,sum(el_nums(1:l-1))+j,i)
                   else 
                      pos1 = xyz(:,j,i)
                   end if   
                   if (m .gt. 1) then
-                     pos2 = xyz(:,sum(el_nums(1:m-1))+k,i+frame_first)
+                     pos2 = xyz(:,sum(el_nums(1:m-1))+k,i)
                   else 
                      pos2 = xyz(:,k,i)
                   end if        

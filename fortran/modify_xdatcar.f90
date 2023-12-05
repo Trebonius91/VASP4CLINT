@@ -21,7 +21,7 @@ real(kind=8),allocatable::xyz(:,:,:),xyz2(:,:,:)
 real(kind=8)::xlen,ylen,zlen
 real(kind=8)::shift_vec(3),act_val,xyz_print(3)
 integer::multiply_vec(3),pick_ind,pos_new,multiply_prod
-integer::frame_first,frame_last
+integer::frame_first,frame_last,line_num
 logical::eval_stat(10)
 logical::shift_cell,multiply_cell,pick_frame,print_xyz,print_last
 character(len=120)::a120,cdum,arg
@@ -214,6 +214,7 @@ allocate(xyz(3,natoms,nframes))
 eval_stat = .false.
 write(*,*)
 write(*,*) "Read in the trajectory from XDATCAR..."
+line_num=1
 do i=1,nframes
 !
 !    Every 10% of the read in, give a status update
@@ -243,7 +244,7 @@ do i=1,nframes
                write(a220(1:endl+4),'(a,a)') a220(1:endl),"   -"
                endl = endl + 4
             else
-               write(a220(1:endl+1),'(a,a)') a220(1:endl),atest
+               write(a220(1:endl+1),'(a,a)',iostat=readstat) a220(1:endl),atest
                endl = endl + 1
             end if
          end do
