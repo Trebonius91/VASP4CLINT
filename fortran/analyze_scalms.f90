@@ -30,11 +30,16 @@ integer::counter,endl
 integer::cls_rounds
 integer::nbins
 integer::atom_slices  ! for writeout of different Ni z positions
+integer::nmins
+real(kind=8),allocatable::min_pos(:)
+real(kind=8),allocatable::z_vals(:)
+real(kind=8),allocatable::int_side(:,:),tot_side(:)
+real(kind=8)::z_min_lower1,z_min_lower2,z_min_upper1,z_min_upper2
 !  RDF calculation
-integer::ig,ngr,npart
+integer::ig,ngr,npart1,npart2
 real(kind=8)::nid,r_act,rho,vb
 real(kind=8)::slice_step
-real(kind=8),allocatable::z_dens(:,:)
+real(kind=8),allocatable::z_dens(:,:),z_dens_tot(:)
 real(kind=8)::zlo,zhi,zdiff,zstep  ! borders of z-density bins 
 character(len=2),allocatable::at_names(:)  ! the element symbols
 logical::write_traj,read_dt
@@ -150,7 +155,6 @@ end do
 !
 rdf_bins = 200  ! number of RDF bins 
 rdf_range = 8.d0  ! maximum distance for RDF
-rdf_binsize = rdf_range/rdf_bins
 
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
@@ -168,6 +172,7 @@ do i = 1, command_argument_count()
    end if
 end do
 
+rdf_binsize = rdf_range/rdf_bins
 
 
 pi=3.141592653589793238
@@ -584,7 +589,11 @@ else
    write(*,*) " completed!"
    close(14)
 end if
+!
+!     Allocate arrays for total and element-wise densities
+! 
 allocate(z_dens(nbins,nelems))
+allocate(z_dens_tot(nbins))
 write(*,*)
 write(*,*) "---------- SETTINGS ---------------------------"
 write(*,*) "Number of atoms in the system:",natoms
@@ -729,12 +738,13 @@ if (calc_rdf) then
          end do
          do j=1,rdf_bins
             ngr=nframes-frame_first
-            npart=el_nums(l)  ! which of both elements?
+            npart1=el_nums(l)  ! which of both elements?
+            npart2=el_nums(m)
             r_act=rdf_binsize*(real(j)+0.5d0)
             vb=((real(j) + 1.d0)**3-real(j)**3)*rdf_binsize**3
-            rho=npart/(abs(box_volume))
-            nid=4.d0/3.d0*pi*vb*rho 
-            rdf_plot(j,l,m)=rdf_plot(j,l,m)/(ngr*npart*nid)
+            rho=1.d0/(abs(box_volume))
+            nid=4.d0/3.d0*pi*vb*rho*2.0d0 
+            rdf_plot(j,l,m)=rdf_plot(j,l,m)/(real(ngr)*real(npart1)*real(npart2)*real(nid))
          end do
       end do
    end do
@@ -775,6 +785,8 @@ end if
 !
 write(*,*) "Calculate element density distributions along z-axis..."
 z_dens = 0.d0
+allocate(z_vals(nbins))
+z_vals=0.d0
 if (use_reaxff) then
    do i=frame_first,nframes
       do l=1,natoms
@@ -807,6 +819,9 @@ else
       end do
    end do
 end if
+do i=1,nbins-1
+   z_dens_tot(i)=sum(z_dens(i,:))
+end do
 write(*,*) " completed!"
 !
 !    Write the density profile to file 
@@ -816,11 +831,133 @@ write(16,'(a)',advance="no") " # z-coordinate    "
 do i=1,nelems
    write(16,'(a,a)',advance="no") el_names(i),"      "
 end do  
-write(16,*)
+write(16,*) "    total  "
 do i=1,nbins-1
-   write(16,*) zlo+(i-0.5d0)*zstep,z_dens(i,:)/(nframes*xlen*ylen*zstep)
+   z_vals(i)=zlo+(i-0.5d0)*zstep
+   write(16,*) z_vals(i),z_dens(i,:)/(nframes*xlen*ylen*zstep),z_dens_tot(i)&
+                     & /(nframes*xlen*ylen*zstep)
 end do
 close(16)
+!
+!    Determine surface concentrations of elements: The parts of the density profile 
+!     between the last local minimum and the asymptotics as well as of the penultimate
+!     local minimum and the asymptotics are integrated
+!     This is only done for binary and ternary systems
+!
+!    First, determine the local minima of the total density profile
+!
+
+if (nelems .gt. 1) then
+   write(*,*)
+   if (nelems .eq. 2) then
+      write(*,*) "Surface concentration of the second element will be determined..."
+   else if (nelems .eq. 3) then
+      write(*,*) "Surface concentrations of the second and third element will be determined..."     
+   end if   
+   allocate(min_pos(nbins))
+   allocate(int_side(2,nelems))
+   allocate(tot_side(2))
+   int_side=0.d0
+   tot_side=0.d0
+   nmins=0
+   do i=14,nbins-13
+      if ((z_dens_tot(i) .lt. z_dens_tot(i+1)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-1)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+2)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-2)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+3)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-3)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+4)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-4)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+5)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-5)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+6)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-6)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+7)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-7)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+8)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-8)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+9)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-9)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+10)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-10)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+11)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-11)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+12)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-12)) &
+       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+13)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-13))) then
+          nmins=nmins+1
+          min_pos(nmins)=z_vals(i)
+      end if
+   end do
+
+
+   open(unit=39,file="surf_concs.dat",status="replace")
+   write(39,'(a)') "# This file contains the concentration of different elements in the "
+   write(39,'(a)') "# surface region of the SCALMS system analyzed with analyzed_scalms"
+   if (nelems .eq. 2) then
+      write(39,'(a)') "# The concentration of the second element is calculated."
+   else if (nelems .eq. 3) then
+      write(39,'(a)') "# The concentrations of the second and the third element are calculated."
+   end if     
+   z_min_lower1 = min_pos(1)
+   z_min_lower2 = min_pos(2)
+   z_min_upper1 = min_pos(nmins)
+   z_min_upper2 = min_pos(nmins-1)
+!
+!     Now calculate the integrated densities
+!
+   do i=1,nbins
+!
+!     Outside the outer minima
+!
+      if (nelems .eq. 2) then
+         if (z_vals(i) .lt. z_min_lower1)then ! .or. z_vals(i) .gt. z_min_upper1) then
+            int_side(1,1)=int_side(1,1)+z_dens(i,2)
+            tot_side(1)=tot_side(1)+z_dens_tot(i)
+         end if
+      else if (nelems .eq. 3) then
+         if (z_vals(i) .lt. z_min_lower1 .or. z_vals(i) .gt. z_min_upper1) then
+            int_side(1,1)=int_side(1,1)+z_dens(i,2)
+            int_side(1,2)=int_side(1,2)+z_dens(i,3)
+            tot_side(1)=tot_side(1)+z_dens_tot(i)
+         end if
+      end if
+!
+!     Outside the penultimate minima
+!
+      if (nelems .eq. 2) then
+         if (z_vals(i) .lt. z_min_lower2 .and. z_vals(i) .gt. z_min_lower1) then
+            int_side(2,1)=int_side(2,1)+z_dens(i,2)
+            tot_side(2)=tot_side(2)+z_dens_tot(i)
+         end if        
+         if (z_vals(i) .gt. z_min_upper2 .and. z_vals(i) .lt. z_min_upper1) then     
+            int_side(2,1)=int_side(2,1)+z_dens(i,2)
+            tot_side(2)=tot_side(2)+z_dens_tot(i)
+         end if
+      else if (nelems .eq. 3) then
+         if (z_vals(i) .lt. z_min_lower2 .and. z_vals(i) .gt. z_min_lower1) then
+            int_side(2,1)=int_side(2,1)+z_dens(i,2)
+            int_side(2,2)=int_side(2,2)+z_dens(i,3)
+            tot_side(2)=tot_side(2)+z_dens_tot(i)
+         end if        
+         if (z_vals(i) .gt. z_min_upper2 .and. z_vals(i) .lt. z_min_upper1) then
+            int_side(2,1)=int_side(2,1)+z_dens(i,2)
+            int_side(2,2)=int_side(2,2)+z_dens(i,3)
+            tot_side(2)=tot_side(2)+z_dens_tot(i)
+         end if   
+      end if
+   end do
+!
+!     Print concentrations to file 
+!
+   write(39,'(a,f14.8,a,f14.8,a)') "# Second element, below z=",z_min_lower1, &
+               & " A and above z=",z_min_upper1," A (%):"
+   write(39,*) int_side(1,1)/(tot_side(1))*100d0
+   write(39,'(a,f14.8,a,f14.8,a)') "# Second element, below z=",z_min_lower2, &
+               & " A and above z=",z_min_upper2," A (%):"
+   write(*,*) int_side(2,1),(tot_side(2))
+   write(39,*) int_side(2,1)/(tot_side(2))*100d0
+   if (nelems .eq. 3) then
+      write(39,'(a,f14.8,a,f14.8,a)') "# Third element, below z=",z_min_lower1, &
+               & " A and above z=",z_min_upper1," A (%):"           
+      write(39,*) int_side(1,2)/(tot_side(1))*100d0
+      write(39,'(a,f14.8,a,f14.8,a)') "# Third element, below z=",z_min_lower2, &
+               & " A and above z=",z_min_upper2," A (%):"
+      write(39,*) int_side(2,2)/(tot_side(2))*100d0
+   end if        
+   close(39)
+   write(*,*) "done!"
+   write(*,*) "File 'surf_concs.dat' with concentrations was written."
+end if
 
 !open(unit=17,file="active_positions.dat",status="replace")
 !

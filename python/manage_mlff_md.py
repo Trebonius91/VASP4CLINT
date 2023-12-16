@@ -22,44 +22,64 @@ print('''
  potentially unstable VASP ML-FF, with the current focus
  on slab calculations. Whenever an atom has moved too far
  from the initial slab geometry away (z-coordinate), the
- current calculation is canceled and a previous structure
- from the XDATCAR is taken as new POSCAR.
+ current calculation is canceled and a previous still resonable
+ structure from the XDATCAR is taken as new POSCAR.
  The atoms in the POSCAR file should have a slab structure 
  and at z=0 should be vacuum!
- The script should be started with the -start flag a folder 
- with complete VASP MLFF MD input!
  During the calculations, the finished part of the trajectory 
  are collected together in a XDATCAR_all file.
  The current status of the script is written to file 
  'manage_mlff_md.log'.
  If the calculation shall be terminated, touch a file named 
  'kill' in the current folder.
+ To start the script, give the following command:
+ manage_mlff_md.py -tolerance=[value] -buffer=[value]
+   -tolerance=[value] gives the maximum distance in Angstrom
+     an atom can depart from the surface before the calculation
+     is restarted (resonable choice: 2-3 Angstroms(?))
+   -buffer=[value] gives for the reset a distance any atom 
+     should below the maximum tolerance such that no direct
+     restart for the next trajectory is needed 
+     (resonable choice: 0.2-0.5 Angstroms(?))
 ''')
 
 #
 #     Maximum elongation of atoms in both sides of the 
 #     slab, in Angstroms
 #
-z_tolerance=3.0
+z_tolerance=-100.0
 #
 #     Tolerance buffer for newly written POSCAR, such that it 
 #     is not directly canceled
 #
-tol_buffer=0.5
+tol_buffer=-100.0
+
+#
+#     Read in needed parameters from command line 
+#
+for arg in sys.argv:
+   if re.search("=",arg):
+      param,actval=arg.split("=")
+      if param == "-tolerance":
+         z_tolerance=float(actval)
+      if param == "-buffer":
+         tol_buffer=float(actval)
+
+
+if z_tolerance < -10.0:
+   print("Please give a value with the -tolerance command!")
+   exit(1)
+if tol_buffer < -10.0:  
+   print("Please give a value with the -buffer command!")
+   exit(1)    
+
+#
+#     From now on, print everything into the logfile!
+#
+            
 
 with open("manage_mlff_md.log", "w") as logfile:
    get_start=False
-   for arg in sys.argv:
-      if re.search("-start",arg):
-         get_start=True
-
-   if get_start:
-      print("manage_mlff_md.py: Control unstable ML-FF trajectories.")
-      print("The calculation will be started.", file=logfile)
-      logfile.flush()
-   else:
-      print("Please give the -start flag to start!")
-      sys.exit(1)
 
 #
 #    Open POSCAR file to find allowed minimum and maximum z-values 
@@ -187,6 +207,16 @@ with open("manage_mlff_md.log", "w") as logfile:
    xdat_steps=int(steps_all/step_freq)
 
 #
+#     Remove old CONTCAR, XDATCAR and XDATCAR_old files
+#
+   if os.path.isfile("CONTCAR"):
+      os.system("rm CONTCAR")
+   if os.path.isfile("XDATCAR"):
+      os.system("rm XDATCAR")
+   if os.path.isfile("XDATCAR_all"):
+      os.system("rm XDATCAR_all")
+
+#
 #     Write header of new unified XDATCAR file
 #
    original_stdout=sys.stdout
@@ -237,17 +267,6 @@ with open("manage_mlff_md.log", "w") as logfile:
    time.sleep(3)
 
 #
-#     Remove old CONTCAR, XDATCAR and XDATCAR_old files 
-#
-   if os.path.isfile("CONTCAR"):
-      os.system("rm CONTCAR")
-   if os.path.isfile("XDATCAR"):
-      os.system("rm XDATCAR")
-   if os.path.isfile("XDATCAR_all"):
-      os.system("rm XDATCAR_all")
-
-
-#
 #     Go in big loop, check status of CONTCAR file every 30 seconds
 #
    unfinished=True
@@ -295,14 +314,14 @@ with open("manage_mlff_md.log", "w") as logfile:
 #     If the total number of frames has been reached, exit 
 #
          if nframes + finished_steps >= int(steps_all/step_freq):
-            print("HURRAY! The ML-FF trajectory is finished!", file=logfile)
             logfile.flush()
             xdat_all=open("XDATCAR_all","a")
             with xdat_all as infile:
                 for i in range (7,7+(nframes)*(natoms+1)):
                    infile.write(xdat_array[i])
             xdat_all.close()
-
+            print("HURRAY! The ML-FF trajectory is finished!", file=logfile)
+            os.system("mv XDATCAR_all XDATCAR")
             sys.exit(0)
 
          else:
@@ -354,6 +373,7 @@ with open("manage_mlff_md.log", "w") as logfile:
 
             print("HURRAY! The ML-FF trajectory is finished!", file=logfile)
             logfile.flush()
+            os.system("mv XDATCAR_all XDATCAR")
             sys.exit(0)
          else:    
             print("The calculation is not finished yet..", file=logfile)
@@ -489,8 +509,13 @@ with open("manage_mlff_md.log", "w") as logfile:
                      z_max_elong=zmax_check-zmax
                      if (z_min_elong > (z_tolerance-tol_buffer)) or (z_max_elong > (z_tolerance-tol_buffer)):
                         frame_act=frame_act-5
+#
+#     In order to avoid an endless loop: reset the calculation even if the threshold is not 
+#      met if no calculation in the trajectory has been found that obeys the criteria
+#
                         if frame_act <= 0:
-                           frame_act = 1 
+                           frame_act = 1
+                           reset = False
                      else:
 #
 #     If a good frame was found, write it to a POSCAR file
