@@ -32,7 +32,8 @@ print('''
   -phasetrans=axis : a unitcell for a phase transition sampling will be 
      build. Must be done in combination with -multiply, for 'axis' either
      a, b or c must be given (as letter). Along the given axis, the 
-     multiplication must be done by an even number.
+     multiplication must be done by an even number. The atoms in the lower
+     part of the cell (along the chosen axis) will be kept fix.
   -writexyz : Write the coordinates of the POSCAR file to a xyz file  
  More than one job can be done at once, the ordering of operation is the 
  same as the ordering of keywords above 
