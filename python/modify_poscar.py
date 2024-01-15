@@ -29,6 +29,10 @@ print('''
      it to cartesian coordinates
   -cart2frac : The the POSCAR is in cartesian coordinates, convert it to
      fractional coordinates 
+  -phasetrans=axis : a unitcell for a phase transition sampling will be 
+     build. Must be done in combination with -multiply, for 'axis' either
+     a, b or c must be given (as letter). Along the given axis, the 
+     multiplication must be done by an even number.
   -writexyz : Write the coordinates of the POSCAR file to a xyz file  
  More than one job can be done at once, the ordering of operation is the 
  same as the ordering of keywords above 
@@ -36,6 +40,7 @@ print('''
 
 multiply_job=False
 shift_job=False
+phasetrans_job=False
 frac2cart=False
 cart2frac=False
 writexyz=False
@@ -50,6 +55,9 @@ for arg in sys.argv:
       if param == "-shift":
          shift_list=actval.split(",")
          shift_job=True
+      if param == "-phasetrans":
+         phasetrans_axis=actval.split(",") 
+         phasetrans_job=True
    else:
       param=arg
       if param == "-frac2cart":
@@ -58,6 +66,7 @@ for arg in sys.argv:
          cart2frac=True
       if param == "-writexyz":
          writexyz=True
+
 
 if (not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac) and (not writexyz):
    print("Please give a least one valid keyword!")
@@ -265,6 +274,39 @@ if multiply_job:
    if shift_job:
       xyz=xyz_new
 
+#   If a phase transition shall be studied, hold the lower half of the multiplied cell
+#   along the chosen axis frozen. Throw error, if the multiplication along this axis 
+#   has no even value
+   if phasetrans_job:
+      if phasetrans_axis[0] == "a":
+         if (mult_vec[0] % 2) == 0: 
+            print(" A phase transition will be built, the lower ",int(mult_vec[0]/2),
+                  "cells along the a-axis")
+            print("  will be kept frozen.")
+         else: 
+            print(" Please give an even number of unit cells along the axis (a) that shall")
+            print("  be used to sample the phase transition!")
+            sys.exit(1)
+      if phasetrans_axis[0] == "b":
+         if (mult_vec[1] % 2) == 0:
+            print(" A phase transition will be built, the lower ",int(mult_vec[1]/2),
+                  "cells along the b-axis") 
+            print("  will be kept frozen.")
+         else: 
+            print(" Please give an even number of unit cells along the axis (b) that shall")
+            print("  be used to sample the phase transition!")
+            sys.exit(1)
+      if phasetrans_axis[0] == "c":
+         if (mult_vec[2] % 2) == 0:
+            print(" A phase transition will be built, the lower ",int(mult_vec[2]/2),
+                  "cells along the c-axis") 
+            print("  will be kept frozen.")
+         else: 
+            print(" Please give an even number of unit cells along the axis (c) that shall")
+            print("  be used to sample the phase transition!")
+            sys.exit(1)
+            
+
 #   First, determine the size and the number of atoms in the new unit cell      
   
    factor=int(mult_vec[0])*int(mult_vec[1])*int(mult_vec[2])
@@ -281,6 +323,8 @@ if multiply_job:
    names_new=[]
    if selective:
       select_new=[]
+   if phasetrans_job:
+      select_new=[]
    if cartesian:
       pos_new=0
       pos_old=0
@@ -295,9 +339,28 @@ if multiply_job:
                    xyz_new[pos_new,2]=(xyz[pos_old,2]+float(j)*a_vec[2]+float(k)*b_vec[2]+
                                        float(l)*c_vec[2])
                    pos_new=pos_new+1
-                   if selective:
-                      select_new.append(coord_select[pos_old])
-                   names_new.append(names[pos_old])   
+#   For the case of phase transitions, freeze the lower part of the multiplied cell
+                   if phasetrans_job:
+                      if phasetrans_axis[0] == "a":
+                         if j < int(mult_vec[0]/2):
+                            select_new.append(" F F F ")
+                         else:
+                            select_new.append(" T T T ")
+                      if phasetrans_axis[0] == "b":
+                         if k < int(mult_vec[1]/2):
+                            select_new.append(" F F F ")
+                         else:
+                            select_new.append(" T T T ")
+                      if phasetrans_axis[0] == "c":
+                         if l < int(mult_vec[2]/2):
+                            select_new.append(" F F F ")
+                         else:
+                            select_new.append(" T T T ")
+                   else:
+                      if selective:
+                         select_new.append(coord_select[pos_old])
+                   names_new.append(names[pos_old])
+
          pos_old=pos_old+1
 
 
@@ -312,8 +375,26 @@ if multiply_job:
                    xyz_new[pos_new,1]=(xyz[pos_old,1]+1.0*float(k))/float(mult_vec[1])
                    xyz_new[pos_new,2]=(xyz[pos_old,2]+1.0*float(l))/float(mult_vec[2])
                    pos_new=pos_new+1
-                   if selective:
-                      select_new.append(coord_select[pos_old])
+#   For the case of phase transitions, freeze the lower part of the multiplied cell
+                   if phasetrans_job:
+                      if phasetrans_axis[0] == "a":
+                         if j < int(mult_vec[0]/2):
+                            select_new.append(" F F F ")
+                         else:
+                            select_new.append(" T T T ")
+                      if phasetrans_axis[0] == "b":
+                         if k < int(mult_vec[1]/2):
+                            select_new.append(" F F F ")            
+                         else:
+                            select_new.append(" T T T ")
+                      if phasetrans_axis[0] == "c":
+                         if l < int(mult_vec[2]/2):
+                            select_new.append(" F F F ")            
+                         else:
+                            select_new.append(" T T T ")     
+                   else:    
+                      if selective:
+                         select_new.append(coord_select[pos_old])
                    names_new.append(names[pos_old])
          pos_old=pos_old+1
 
@@ -323,7 +404,12 @@ if multiply_job:
    c_vec=np.multiply(c_vec,mult_vec[2])
 
    names=names_new
-   coord_select=select_new
+#   For a phase transition job, always print selective coordinates   
+   if phasetrans_job:
+      selective = True
+
+   if selective:
+      coord_select=select_new
    print(" done!\n")
 # C: TRANSLATE FROM DIRECT TO CARTESIAN ###################################
 if frac2cart:
