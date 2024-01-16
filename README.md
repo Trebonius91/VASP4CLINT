@@ -20,6 +20,7 @@ Currently included are:
 
  - **built_adsorbates.py** : Place adsorbate atoms or molecules on or in surface slabs. Positions and rotations can be controlled by input files.
  - **build_scalms.py** :  Build unit cells of liquid metal alloys on a simple cubic grid (bulk, slab and cluster possible)
+ - **eval_neb.py** : Evaluates a nudged elastic band calculation, no matter if already started or finished
  - **manage_mlff_md.py** : Starts and supervises a ML-FF trajectory of a surface slab, restarts if errors occur
  - **modify_poscar.py** : Perform several simple operations on a POSCAR file, such as shifting its atoms, multiply the cel, transform from cartesian to internal coordinates and the other way round
 
