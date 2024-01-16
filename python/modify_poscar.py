@@ -27,13 +27,17 @@ print('''
      cell and its content along x and y, keeping it along z)
   -frac2cart : If the POSCAR is in direct/fractional coordinates, convert
      it to cartesian coordinates
-  -cart2frac : The the POSCAR is in cartesian coordinates, convert it to
+  -cart2frac : The POSCAR is in cartesian coordinates, convert it to
      fractional coordinates 
+  -freeze=elems : Set all atoms belonging to a list of elements to F F F,
+     for example for frequency calculations, where a surface is kept fix.
+     Example: freeze=Pt,O (Pt and O atoms will be kept fix)
   -phasetrans=axis : a unitcell for a phase transition sampling will be 
      build. Must be done in combination with -multiply, for 'axis' either
      a, b or c must be given (as letter). Along the given axis, the 
      multiplication must be done by an even number. The atoms in the lower
      part of the cell (along the chosen axis) will be kept fix.
+     Example -phasetrans=c (with -multiply=2,2,4)
   -writexyz : Write the coordinates of the POSCAR file to a xyz file  
  More than one job can be done at once, the ordering of operation is the 
  same as the ordering of keywords above 
@@ -43,6 +47,7 @@ multiply_job=False
 shift_job=False
 phasetrans_job=False
 frac2cart=False
+freeze=False
 cart2frac=False
 writexyz=False
 
@@ -59,6 +64,9 @@ for arg in sys.argv:
       if param == "-phasetrans":
          phasetrans_axis=actval.split(",") 
          phasetrans_job=True
+      if param == "-freeze":
+         freeze_list=actval.split(",")
+         freeze=True
    else:
       param=arg
       if param == "-frac2cart":
@@ -69,7 +77,8 @@ for arg in sys.argv:
          writexyz=True
 
 
-if (not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac) and (not writexyz):
+if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac) 
+    and (not writexyz) and (not freeze)):
    print("Please give a least one valid keyword!")
    sys.exit(1)
 
@@ -127,6 +136,7 @@ with poscar_in as infile:
       for j in range(elem_num[i]):
           names.append(elements[i])
 
+
    natoms=int(natoms)
    # read in the list of atoms 
    xyz = np.zeros((natoms,3))
@@ -157,6 +167,25 @@ with poscar_in as infile:
          coord_select.append(select_read[0] + " " + select_read[1] + " " + select_read[2]) 
       for j in range(3):
          xyz[i][j]=float(xyz_read[j]) 
+# If the freeze mode is activated, set the selective dynamics for all chosen elements to F
+#  and for all others to T, no matter, which selectivity existed beforehand
+
+if freeze:
+   coord_select = [] 
+   if not selective: 
+      selective = True     
+   for name in names:
+      freeze_act=False  
+      for frozen in freeze_list: 
+         if name == frozen:
+            freeze_act=True 
+      if freeze_act:
+         coord_select.append(" F F F ")
+      else:   
+         coord_select.append(" T T T ")
+   if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac)):
+      xyz_new=xyz
+      select_new=coord_select
 
 # Define coordinate transformation as functions in order to use them intermediately!
 # F1: FRAC2CART
