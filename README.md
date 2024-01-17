@@ -32,6 +32,7 @@ Currently included are:
 
  - **analyze_scalms** : Analyze trajectories of liquid metal surface or bulk simulations
  - **cut_unitcell** : Cut an arbitrary shaped surface slab unit cell from a given larger surface slab
+ - **eval_bader** : Evaluates and visualizes Bader charge calculations
  - **modify_xdatcar** : Modify XDATCAR trajectory files: shifts, multiplications, writing of xyz files
  - **partial_dos** : Extract the partial density of states for certain atoms, elements or orbitals from a DOSCAR file
  
