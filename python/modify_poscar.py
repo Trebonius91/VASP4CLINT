@@ -32,6 +32,11 @@ print('''
   -freeze=elems : Set all atoms belonging to a list of elements to F F F,
      for example for frequency calculations, where a surface is kept fix.
      Example: freeze=Pt,O (Pt and O atoms will be kept fix)
+  -bottom=value : Set all atoms below the z-coordinate 'value' to F F F,
+     for example for optimizations on surfaces, where the lower two layers
+     are kept fix. Depending on the input format of the POSCAR, the value
+     must be given in direct or cartesian coordinates.
+     Example: bottom=3.5 (atoms below 3.5 A are frozen, cartesian)
   -phasetrans=axis : a unitcell for a phase transition sampling will be 
      build. Must be done in combination with -multiply, for 'axis' either
      a, b or c must be given (as letter). Along the given axis, the 
@@ -50,6 +55,7 @@ frac2cart=False
 freeze=False
 cart2frac=False
 writexyz=False
+bottom=False
 
 # Read in the command line arguments
 for arg in sys.argv:
@@ -67,6 +73,10 @@ for arg in sys.argv:
       if param == "-freeze":
          freeze_list=actval.split(",")
          freeze=True
+      if param == "-bottom":
+         freeze_bottom=float(actval)
+         bottom=True
+
    else:
       param=arg
       if param == "-frac2cart":
@@ -78,7 +88,7 @@ for arg in sys.argv:
 
 
 if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac) 
-    and (not writexyz) and (not freeze)):
+    and (not writexyz) and (not freeze) and (not bottom)):
    print("Please give a least one valid keyword!")
    sys.exit(1)
 
@@ -186,6 +196,8 @@ if freeze:
    if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac)):
       xyz_new=xyz
       select_new=coord_select
+
+
 
 # Define coordinate transformation as functions in order to use them intermediately!
 # F1: FRAC2CART
@@ -510,9 +522,14 @@ if writexyz:
     
 
 
+# If the bottom option is activated, turn on the selective switch
+if bottom:
+   selective = True
+   if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac)):
+      xyz_new=xyz
+      select_new=[]
 
 
- 
 # Finally, write out the modified POSCAR file POSCAR_mod
 
 print(" New file POSCAR_mod will be written...")
@@ -551,6 +568,13 @@ with open("POSCAR_mod","w") as f:
 
    if selective:
       for i in range(natoms):
+# If the bottom option is activated, freeze the atoms below a certain z-value          
+         if bottom:
+            if xyz_new[i][2] <= freeze_bottom:
+               select_new.append(" F F F ")
+            else:   
+               select_new.append(" T T T ")
+
          print(str(xyz_new[i][0]) + " " + str(xyz_new[i][1]) + " " +
               str(xyz_new[i][2]) + " " + select_new[i])
    else:
