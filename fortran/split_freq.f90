@@ -14,19 +14,29 @@
 
 program split_freq
 implicit none 
-integer::i,j,k
+integer::i,j,k,l
 logical::setup,eval,file_exists
-logical,allocatable::frozen_split(:,:)
-character(len=120)::arg,adum
-character(len=50)::select_string,coord_string,foldername
+logical,allocatable::frozen_split(:,:),frozen_all(:)
+character(len=120)::arg,adum,line
+character(len=50)::select_string,coord_string,foldername,string
 integer::nchunks,readstat,ind
 integer::natoms,el_num,num_moved,workload
-character(len=2),allocatable::el_init(:),el_names(:)
+integer::force_act,hit_act
+character(len=2),allocatable::el_init(:),el_names(:),at_names(:)
 character(len=1),allocatable::selective(:,:)
-integer,allocatable::el_numbers(:)
+integer,allocatable::el_numbers(:),chunk_lens(:),at_moved(:)
+integer,allocatable::at_index(:)
 real(kind=8)::cell_scale
+real(kind=8)::potim
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
-real(kind=8),allocatable::xyz(:,:)
+real(kind=8),allocatable::xyz(:,:),force_vecs(:,:,:),hess(:,:)
+real(kind=8),allocatable::el_mass(:),coord_mass(:),at_mass(:)
+real(kind=8),allocatable::n_vib(:,:,:)
+character(len=1)::JOBZ,UPLO
+integer::M,Nn,LDA,LDU,LDV,LWORK,INFO
+real(kind=8),dimension(:),allocatable::WORK,W
+real(kind=8),dimension(:,:),allocatable::A_mat
+real(kind=8),dimension(:,:),allocatable::U
 
 write(*,*)
 write(*,*) "PROGRAM split_freq: performs VASP frequency calculations"
@@ -142,6 +152,10 @@ if (setup) then
 !    Open the POSCAR file and read in its content
 !
    open(unit=56,file="POSCAR",status="old",iostat=readstat)
+   if (readstat .ne. 0) then
+      write(*,*) "The POSCAR file could not been found!"
+      stop
+   end if        
    read(56,*)
    read(56,*) cell_scale
    read(56,*) a_vec(:)
@@ -268,7 +282,7 @@ if (eval) then
 !
 !    Determine number of chunks: existence of highest folder
 !
-   ind=0
+   ind=1
    do
       if (ind .lt. 10) then
          write(foldername,'(a,i1)') "chunk",ind
@@ -277,13 +291,137 @@ if (eval) then
       else
          write(foldername,'(a,i3)') "chunk",ind
       end if
-      inquire(file=foldername//"/vasprun.cml",exist=file_exists)
+      inquire(file=trim(foldername)//"/vasprun.xml",exist=file_exists)
       if (.not. file_exists) exit
+      ind=ind+1
    end do
+   nchunks=ind-1
+   if (nchunks .lt. 2) then
+      write(*,*) "There need to be at least two chunk folders with vasprun.xml files!"
+      stop 
+   end if  
+   write(*,'(a,i4,a)') " In total, ",nchunks," frequency calculation chunks were performed." 
+!
+!    Open the POSCAR file to determine the total number of atoms and which atoms were 
+!    moved during the frequency calculation
+!
+      
+   open(unit=56,file="POSCAR",status="old",iostat=readstat)
+   if (readstat .ne. 0) then
+      write(*,*) "The POSCAR file could not been found!"
+      stop
+   end if        
+   read(56,*)
+   read(56,*) cell_scale
+   read(56,*) a_vec(:)
+   read(56,*) b_vec(:)
+   read(56,*) c_vec(:)
+   read(56,'(a)') adum
+!
+!    Determine number of different elements in file 
+!
+   do i=10,1,-1
+      allocate(el_init(i))
+      read(adum,*,iostat=readstat) el_init(:)
+      if (readstat .eq. 0) then
+         el_num=i
+         allocate(el_names(el_num))
+         el_names(1:el_num)=el_init(1:el_num)
+         exit
+      end if
+      deallocate(el_init)
+   end do
+   
 
+   allocate(el_numbers(el_num))
+   allocate(el_mass(el_num))
+   read(56,*) el_numbers
+   natoms=sum(el_numbers)
+   read(56,'(a)') select_string
+   read(56,'(a)') coord_string
+   allocate(xyz(3,natoms))
+   allocate(selective(3,natoms))
+   do i=1,natoms
+      read(56,*) xyz(:,i),selective(:,i)
+   end do
+   close(56)
+!
+!     Convert coordinates to cartesian coordinates if needed
+!
+   if (index(coord_string,'Direct') .ne. 0 .or. index(coord_string,'direct') .ne. 0) then
+      do i=1,natoms
+         xyz(:,i)=xyz(1,i)*a_vec(:)+xyz(2,i)*b_vec(:)+xyz(3,i)*c_vec(:)
+      end do
+   end if        
+
+!
+!     Determine total number of non-frozen atoms
+!     and asssign them to the different chunks of the calculation
+!
+   allocate(chunk_lens(nchunks))
+   allocate(frozen_split(natoms,nchunks+1))
+   allocate(frozen_all(natoms))
+   frozen_split=.false.
+   frozen_all=.false.
+   num_moved=0
+   do i=1,natoms
+      if (selective(1,i) .eq. "T" .or. selective(2,i) .eq. "T" .or. &
+                  & selective(3,i) .eq. "T") then
+         frozen_split(i,1) = .true.
+         frozen_all(i)=.true.
+         num_moved = num_moved + 1
+      end if
+   end do
+   allocate(at_moved(num_moved))
+   ind=1
+   do i=1,natoms
+      if (frozen_split(i,1)) then
+         at_moved(ind) = i
+         ind=ind+1
+      end if        
+   end do
+   write(*,'(a,i8,a)') " The system contains ",natoms," atoms."
+   write(*,'(a,i8,a)') " Of them, ",num_moved," atoms were activated for numerical frequencies."
+!
+!     Number of atoms per chunk (the last will get less work)
+!
+   workload=ceiling(real(num_moved)/real(nchunks))
+   do i=1,nchunks-1
+      chunk_lens(i)=workload
+      do j=1,workload
+         do k=1,natoms
+            if (frozen_split(k,1)) then
+               frozen_split(k,i+1) = .true.
+               frozen_split(k,1) = .false.
+               exit
+            end if
+         end do
+      end do
+   end do
+!
+!     The last chunk
+!
+   chunk_lens(nchunks)=num_moved-(nchunks-1)*workload
+   do j=1,num_moved-(nchunks-1)*workload
+      do k=1,natoms
+         if (frozen_split(k,1)) then
+            frozen_split(k,nchunks+1) = .true.
+            frozen_split(k,1) = .false.
+            exit
+         end if
+      end do
+   end do
+   
 !
 !    First read in the force vectors of all elongations (apart from the unchanged beginning)
 !
+   force_act=0
+   allocate(force_vecs(3,natoms,6*num_moved))
+   allocate(hess(3*num_moved,3*num_moved))
+
+   write(*,*)
+   write(*,*) "Set all chunks together and construct the Hessian matrix..."
+
    do i=1,nchunks 
       if (i .lt. 10) then
          write(foldername,'(a,i1)') "chunk",i
@@ -293,18 +431,257 @@ if (eval) then
          write(foldername,'(a,i3)') "chunk",i
       end if
 
-      call chdir(foldername)     
+      call chdir(foldername)   
+!
+!    Open and read in the vasprun.xml file
+!
+      open(unit=78,file="vasprun.xml",iostat=readstat)
+      if (readstat .ne. 0) then
+         write(*,*) "The vasprun.xml file in folder ",trim(foldername)," could not been found!"
+         stop
+      end if 
+      hit_act=0      
+      do
+         read(78,'(a)',iostat=readstat) line
+         if (readstat .ne. 0) exit
+         if (index(line,'forces') .ne. 0) then
+            hit_act=hit_act+1
+            if (hit_act .gt. 1) then     
+               force_act=force_act+1    
+               do j=1,natoms
+                  read(78,*) adum,force_vecs(:,j,force_act)
+               end do
+            end if   
+         end if   
+!
+!    The elongation during the numerical calculation
+!
+         if (index(line,'POTIM') .ne. 0) then
+            read(line,*) adum,adum,string
+            read(string(1:8),*) potim 
+         end if        
+!
+!    The masses of all atoms 
+!
+         if (index(line,'atomspertype') .ne. 0) then
+            if (el_mass(1) .lt. 0.01) then         
+               read(78,*)
+               read(78,*)
+               read(78,*)
+               read(78,*)
+               read(78,*)
+               do k=1,el_num
+                  read(78,'(a)') line
+                  read(line(34:46),*) el_mass(k)
+               end do
+               allocate(coord_mass(3*num_moved),at_mass(natoms))
+               allocate(at_names(natoms))
+               allocate(at_index(natoms))
+               ind=1
+               do k=1,el_num
+                  do l=1,el_numbers(k)
+                     at_mass(ind)=el_mass(k)
+                     at_names(ind)=el_names(k)
+                     call elem(at_names(ind),at_index(ind))
+                     ind=ind+1
+                  end do                  
+               end do
+
+               do k=1,num_moved
+                  coord_mass((k-1)*3+1)=at_mass(at_moved(k))
+                  coord_mass((k-1)*3+2)=at_mass(at_moved(k))
+                  coord_mass((k-1)*3+3)=at_mass(at_moved(k))
+               end do
+            end if        
+         end if
 
 
+      end do
+    !  force_act=force_act-1
+      close(78)
 
+      call chdir("..")
+      
    end do
 
+   do i=1,3*num_moved
+   !   write(*,*) "mass",i,coord_mass(i)
+   end do
+!
+!    Now calculate the full Hessian numerically
+!
+   do i=1,3*num_moved
+      do j=1,num_moved
+         do k=1,3
+            hess(i,(j-1)*3+k) = -(force_vecs(k,at_moved(j),(i-1)*2+1)- &
+                     & force_vecs(k,at_moved(j),(i-1)*2+2))/(2d0*potim)
+         end do
+      end do
+   end do
+!
+!    Mass-scale the hessian for correct frequencies
+!
+   do i=1,3*num_moved
+      do j=1,3*num_moved
+         hess(i,j)=hess(i,j)/sqrt(coord_mass(i)*coord_mass(j))
+      end do
+   end do
+   write(*,*) "done!"
+   write(*,*) "Diagonalize the Hessian and calculate normal modes..."
+!
+!    Diagonalize the hessian
+!
+!   therafter: W=frequencies, A=normal coordinates
+!
+   JOBZ='V' !eigenvalues and eigenvectors(U)
+   UPLO='U' !upper triangle of a
+   Nn=3*num_moved
+   LDA=Nn
+   INFO=0
+   LWORK=Nn*Nn-1
+   allocate(A_mat(Nn,Nn))
+   allocate(W(Nn))
+   allocate(WORK(LWORK))
+   A_mat=hess
+   call DSYEV(JOBZ,UPLO,Nn,A_mat,LDA,W,WORK,LWORK,INFO)
 
+   if (info .ne. 0) then
+      write(*,*) "The diagonalization of the hessian matrix with Lapack returned"
+      write(*,*) " an error code!"
+      stop
+   end if
+!
+!     Obtain frequencies with correct unit etc.
+!
+   do i = 1, 3*num_moved
+      W(i)=sign(sqrt(abs(W(i))),W(i))
+   end do
+!
+!     Do conversion according to Mopac manual: 
+!     http://openmopac.net/manual/Hessian_Matrix.html
+!
+!     1: from eV/Ang^2 to kcal/(mol*Ang^2)
+!
+   W=W*sqrt(23.0609d0)
+!
+!     2: from kcal/(mol*Ang^2) to millidynes/Ang (and to Newton/m/kg)
+!
+   W=W*sqrt(1E8*4184d0/(1E-10*6.023E23))
+!
+!     3: from millidynes/Ang to cm^-1
+!
+   W=W*1302.79d0
+!
+!     Calculate normal mode vibration vectors
+!
+   allocate(n_vib(3,num_moved,Nn))
+   do i=1,3*num_moved
+      do j=1,num_moved
+         do k=1,3
+            n_vib(k,j,i)=A_mat((j-1)*3+k,i)/sqrt(coord_mass((j-1)*3+k))
+         end do
+      end do
+   end do
+   write(*,*) "done!"
 
-
+!
+!     Write molden format output file
+!
+   open(unit=49,file="combined_full.molden",status="replace")
+   write(49,*) "[Molden Format]"
+   write(49,*) "[Atoms] Angs"
+   do i=1,natoms
+      write(49,'(a,a,i7,i4,3f12.6)') " ",at_names(i),i,at_index(i),xyz(:,i)
+   end do
+   write(49,*) "[FREQ]"
+   do i=1,3*num_moved
+      write(49,'(f10.4)') W(i)
+   end do
+   write(49,*) "[INT]"
+   do i=1,3*num_moved
+      write(49,*) 1.0d0
+   end do
+   write(49,*) "[FR-COORD]"
+   do i=1,natoms
+      write(49,'(a,a,3f11.6)') " ",at_names(i),xyz(:,i)/0.52917721092d0
+   end do
+   write(49,*) "[FR-NORM-COORD]"
+   do i=1,3*num_moved
+      write(49,'(a,i7)') "vibration",i
+      ind=1
+      do j=1,natoms
+         if (frozen_all(j)) then
+            write(49,'(3f11.6)') n_vib(:,ind,i)
+            ind=ind+1
+         else
+            write(49,'(3f11.6)') 0.0d0, 0.0d0, 0.0d0  
+         end if    
+      end do
+   end do
+   close(49)
+   write(*,*)
+   write(*,*) "File 'combined_full.molden' for mode visualization written!"
 end if        
 
 
 
+write(*,*)
+write(*,*) "Program split_freq exited normally."
+write(*,*)
 
-end program split_freq      
+end program split_freq    
+
+
+!
+!     subroutine elem: read in character with element symbol and
+!       give out the number
+!
+!     part of QMDFF
+!
+subroutine elem(key1, nat)
+IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+CHARACTER(len=*)::KEY1
+CHARACTER(len=2)::ELEMNT(107),E
+
+DATA ELEMNT/'h ','he', &
+ & 'li','be','b ','c ','n ','o ','f ','ne', &
+ & 'na','mg','al','si','p ','s ','cl','ar', &
+ & 'k ','ca','sc','ti','v ','cr','mn','fe','co','ni','cu', &
+ & 'zn','ga','ge','as','se','br','kr', &
+ & 'rb','sr','y ','zr','nb','mo','tc','ru','rh','pd','ag', &
+ & 'cd','in','sn','sb','te','i ','xe', &
+ & 'cs','ba','la','ce','pr','nd','pm','sm','eu','gd','tb','dy', &
+ & 'ho','er','tm','yb','lu','hf','ta','w ','re','os','ir','pt', &
+ & 'au','hg','tl','pb','bi','po','at','rn', &
+ & 'fr','ra','ac','th','pa','u ','np','pu','am','cm','bk','cf','xx', &
+ & 'fm','md','cb','xx','xx','xx','xx','xx'/
+
+nat=0
+e='  '
+do i=1,len(key1)
+   if (key1(i:i).ne.' ') L=i
+end do
+k=1
+DO J=1,L
+   if (k.gt.2) exit
+   N=ICHAR(key1(J:J))
+   if (n.ge.ichar('A') .and. n.le.ichar('Z') ) then
+      e(k:k)=char(n+ICHAR('a')-ICHAR('A'))
+      k=k+1
+   end if
+   if (n.ge.ichar('a') .and. n.le.ichar('z') ) then
+      e(k:k)=key1(j:j)
+      k=k+1
+   end if
+end do
+
+DO I=1,107
+   if (e.eq.elemnt(i)) then
+      NAT=I
+      RETURN
+   END IF
+END DO
+
+return
+end subroutine elem
+
