@@ -17,26 +17,29 @@ implicit none
 integer::i,j,k,l
 logical::setup,eval,file_exists
 logical,allocatable::frozen_split(:,:),frozen_all(:)
+logical::do_intens
 character(len=120)::arg,adum,line
 character(len=50)::select_string,coord_string,foldername,string
 integer::nchunks,readstat,ind
 integer::natoms,el_num,num_moved,workload
-integer::force_act,hit_act
+integer::force_act,pos_act,hit_act,hit_act2
 character(len=2),allocatable::el_init(:),el_names(:),at_names(:)
 character(len=1),allocatable::selective(:,:)
 integer,allocatable::el_numbers(:),chunk_lens(:),at_moved(:)
 integer,allocatable::at_index(:)
-real(kind=8)::cell_scale
-real(kind=8)::potim
+real(kind=8)::cell_scale,cnvint
+real(kind=8)::potim,deltaxyz
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
 real(kind=8),allocatable::xyz(:,:),force_vecs(:,:,:),hess(:,:)
+real(kind=8),allocatable::pos_vecs(:,:,:),dipoles(:,:)
 real(kind=8),allocatable::el_mass(:),coord_mass(:),at_mass(:)
-real(kind=8),allocatable::n_vib(:,:,:)
+real(kind=8),allocatable::n_vib1(:,:,:),n_vib2(:,:,:),intens(:,:)
+real(kind=8),allocatable::totintens(:)
+real(kind=8),allocatable::dxyz(:,:),ddip(:,:,:),dipgrad(:,:,:)
 character(len=1)::JOBZ,UPLO
-integer::M,Nn,LDA,LDU,LDV,LWORK,INFO
+integer::Nn,LDA,LDU,LDV,LWORK,INFO
 real(kind=8),dimension(:),allocatable::WORK,W
 real(kind=8),dimension(:,:),allocatable::A_mat
-real(kind=8),dimension(:,:),allocatable::U
 
 write(*,*)
 write(*,*) "PROGRAM split_freq: performs VASP frequency calculations"
@@ -416,9 +419,12 @@ if (eval) then
 !    First read in the force vectors of all elongations (apart from the unchanged beginning)
 !
    force_act=0
+   pos_act=0
    allocate(force_vecs(3,natoms,6*num_moved))
+   allocate(pos_vecs(3,natoms,6*num_moved))
    allocate(hess(3*num_moved,3*num_moved))
-
+   allocate(dipoles(3,6*num_moved))
+   dipoles=0.d0
    write(*,*)
    write(*,*) "Set all chunks together and construct the Hessian matrix..."
 
@@ -441,9 +447,21 @@ if (eval) then
          stop
       end if 
       hit_act=0      
+      hit_act2=0
       do
          read(78,'(a)',iostat=readstat) line
          if (readstat .ne. 0) exit
+!
+!    Leave current file if final positions have been reached
+!
+         if (index(line,'finalpos') .ne. 0) then
+            exit
+         end if
+                 
+!
+!    The force vectors for the elongations
+!
+
          if (index(line,'forces') .ne. 0) then
             hit_act=hit_act+1
             if (hit_act .gt. 1) then     
@@ -453,6 +471,35 @@ if (eval) then
                end do
             end if   
          end if   
+!
+!    The elongated geometries (+ basis vectors, directly convert them to 
+!         cartesian coordinates)
+!
+         if (index(line,'name="basis"') .ne. 0) then
+            hit_act2=hit_act2+1
+            if (hit_act2 .gt. 3) then
+               pos_act=pos_act+1
+               read(78,*) adum,a_vec(:)
+               read(78,*) adum,b_vec(:)
+               read(78,*) adum,c_vec(:)
+               do j=1,9
+                  read(78,'(a)') adum
+               end do
+               do j=1,natoms
+                  read(78,*) adum,pos_vecs(:,j,pos_act)
+                  pos_vecs(:,j,pos_act)=pos_vecs(1,j,pos_act)*a_vec(:)+ &
+                            & pos_vecs(2,j,pos_act)*b_vec(:)+ pos_vecs(3,j,pos_act)*c_vec(:)
+               end do
+            end if
+         end if
+!
+!    The dipole moments: only the last one for each SCF cycle:
+!     Index of the last geometry before it
+!
+         if (index(line,'name="dipole"') .ne. 0) then
+            read(line,*) adum,adum,dipoles(:,pos_act+1)
+         end if        
+         
 !
 !    The elongation during the numerical calculation
 !
@@ -503,6 +550,16 @@ if (eval) then
       call chdir("..")
       
    end do
+!
+!    Give a warning if no dipoles were found
+!
+   do_intens=.true.
+   if (abs(sum(dipoles)) .lt. 0.001d0) then
+       write(*,*) "WARNING: No dipoles were found in vasprun.xml files!"
+       write(*,*) " Did you forget to add the LDIPOL and IDIPOL keywords?"
+       write(*,*) "IR intensities will not be calculated."
+       do_intens=.false.
+   end if        
 
    do i=1,3*num_moved
    !   write(*,*) "mass",i,coord_mass(i)
@@ -572,20 +629,88 @@ if (eval) then
 !
    W=W*1302.79d0
 !
-!     Calculate normal mode vibration vectors
+!     Calculate normal mode vibration vectors (for all atoms and 
+!      only for active atoms)
 !
-   allocate(n_vib(3,num_moved,Nn))
+   allocate(n_vib1(3,num_moved,Nn))
+   allocate(n_vib2(3,natoms,Nn))
    do i=1,3*num_moved
       do j=1,num_moved
          do k=1,3
-            n_vib(k,j,i)=A_mat((j-1)*3+k,i)/sqrt(coord_mass((j-1)*3+k))
+            n_vib1(k,j,i)=A_mat((j-1)*3+k,3*num_moved-i+1)/sqrt(coord_mass((j-1)*3+k))
          end do
       end do
    end do
+!
+!     Fill full (all n atoms) normal mode vectors
+!
+   do i=1,3*num_moved
+      ind=1
+      do j=1,natoms
+         if (frozen_all(j)) then
+            n_vib2(:,j,i)=n_vib1(:,ind,i)
+            ind=ind+1
+         else
+            n_vib2(:,j,i)=0.d0
+         end if
+      end do
+   end do
+
    write(*,*) "done!"
+!
+!     Calculate the dipol derivatives 
+!
+   if (do_intens) then
+      allocate(dipgrad(3,3,natoms))
+      allocate(dxyz(3,natoms))
+      allocate(ddip(3,3,natoms))
+      dipgrad=0.d0
+      dxyz=0.d0
+      ddip=0.d0
+      do i=1,num_moved*3
+         do j=1,natoms
+            do k=1,3
+               deltaxyz=pos_vecs(k,j,(i-1)*2+1)-pos_vecs(k,j,(i-1)*2+2)
+               if (deltaxyz .gt. 1E-6) then
+                  dxyz(k,j) = deltaxyz
+                  do l=1,3
+                     ddip(l,k,j) = dipoles(l,(i-1)*2+1)-dipoles(l,(i-1)*2+2)
+                     dipgrad(l,k,j)=ddip(l,k,j) / dxyz(k,j)
+                  end do
+               end if        
+            end do
+         end do
+      end do
+   end if
+   do j=1,natoms
+      do k=1,3
+      !      write(*,*) "grad", dipgrad(:,k,j)
+      end do    
+   end do
+!
+!     Calculate normal mode intensities
+!
+   if (do_intens) then
+      cnvint = 974.88d0  ! VASP uses amu, from vasp2molden.py
+      allocate(intens(3,3*num_moved))
+      allocate(totintens(3*num_moved)) 
+      intens=0.d0
+      totintens=0.d0    
+      do i=1,3*num_moved
+         do j=1,3
+            do k=1,natoms
+               do l=1,3
+                  intens(j,i)=intens(j,i)+dipgrad(j,l,k)*n_vib2(l,k,i)            
+               end do
+            end do
+            intens(j,i)=intens(j,i)*intens(j,i)*cnvint
+            totintens(i)=totintens(i)+intens(j,i)
+         end do
+      end do
+   end if        
 
 !
-!     Write molden format output file
+!     Write molden format output file for full system 
 !
    open(unit=49,file="combined_full.molden",status="replace")
    write(49,*) "[Molden Format]"
@@ -595,11 +720,15 @@ if (eval) then
    end do
    write(49,*) "[FREQ]"
    do i=1,3*num_moved
-      write(49,'(f10.4)') W(i)
+      write(49,'(f10.4)') W(3*num_moved-i+1)
    end do
    write(49,*) "[INT]"
    do i=1,3*num_moved
-      write(49,*) 1.0d0
+      if (do_intens) then
+         write(49,'(f10.4)') totintens(i)
+      else
+         write(49,'(f10.4)') 1.0d0
+      end if        
    end do
    write(49,*) "[FR-COORD]"
    do i=1,natoms
@@ -610,17 +739,50 @@ if (eval) then
       write(49,'(a,i7)') "vibration",i
       ind=1
       do j=1,natoms
-         if (frozen_all(j)) then
-            write(49,'(3f11.6)') n_vib(:,ind,i)
-            ind=ind+1
-         else
-            write(49,'(3f11.6)') 0.0d0, 0.0d0, 0.0d0  
-         end if    
+         write(49,'(3f11.6)') n_vib2(:,j,i)
       end do
    end do
    close(49)
    write(*,*)
-   write(*,*) "File 'combined_full.molden' for mode visualization written!"
+   write(*,*) "File 'combined_full.molden' for mode visualization (all atoms) written!"
+!
+!    Write molden format output file for active atoms
+!
+   open(unit=50,file="combined_active.molden",status="replace")
+   write(50,*) "[Molden Format]"
+   write(50,*) "[Atoms] Angs"
+   do i=1,num_moved
+      write(50,'(a,a,i7,i4,3f12.6)') " ",at_names(at_moved(i)),i,at_index(at_moved(i)),xyz(:,at_moved(i))
+   end do
+   write(50,*) "[FREQ]"
+   do i=1,3*num_moved
+      write(50,'(f10.4)') W(3*num_moved-i+1)
+   end do
+   write(50,*) "[INT]"
+   do i=1,3*num_moved
+      if (do_intens) then
+         write(50,'(f10.4)') totintens(i)
+      else
+         write(50,'(f10.4)') 1.0d0
+      end if
+   end do
+   write(50,*) "[FR-COORD]"
+   do i=1,num_moved
+      write(50,'(a,a,3f11.6)') " ",at_names(at_moved(i)),xyz(:,at_moved(i))/0.52917721092d0
+   end do
+   write(50,*) "[FR-NORM-COORD]"
+   do i=1,3*num_moved
+      write(50,'(a,i7)') "vibration",i
+      ind=1
+      do j=1,num_moved
+         write(50,'(3f11.6)') n_vib2(:,at_moved(j),i)
+      end do
+   end do
+   close(50)
+   write(*,*)
+   write(*,*) "File 'combined_active.molden' for mode visualization (active atoms) written!"
+
+
 end if        
 
 
