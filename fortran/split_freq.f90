@@ -52,13 +52,15 @@ write(*,*) "  into a desired number of chunks. Must be started in a folder"
 write(*,*) "  with full VASP input (INCAR, KPOINTS, POTCAR, POSCAR)"
 write(*,*) "  Then, a number of subfolders (chunk1, chunk2, ...) is generated"
 write(*,*) "  and you must start the calculations in them invidually."
-write(*,*) "  usage: split_freq -setup -chunks=[number of chunks]"
+write(*,*) "  usage: "
+write(*,*) "   split_freq -setup -chunks=[number of chunks]"
 write(*,*) "-Mode B: Evaluation: Takes the calculation output within the "
 write(*,*) "  chunk folders and sets them together and reconstructs the "
 write(*,*) "  global Hessian matrix and frequencies from them. Must be "
 write(*,*) "  started in the folder where all chunk folders are located,"
 write(*,*) "  together with a POSCAR file, where all moved atoms are 'T T T'"
-write(*,*) "  usage: split_freq -eval "
+write(*,*) "  usage: "
+write(*,*) "   split_freq -eval "
 
 setup=.false.
 eval=.false.
@@ -234,6 +236,14 @@ if (setup) then
       end do
    end do
 
+   write(*,*) "Number of chunks chosen: ",nchunks
+   write(*,*) "Number of moved atoms in total: ",num_moved
+   write(*,*) "Number of moved atoms per chunk:"
+   do i=1,nchunks-1
+      write(*,'(a,i4,a,i6)') "  Chunk ",i,": ",workload
+   end do
+   write(*,'(a,i4,a,i6)') "  Chunk ",nchunks,": ",num_moved-(nchunks-1)*workload
+   write(*,*)
 !
 !     Now write the input for the nchunks partial frequency calculations
 !
@@ -270,9 +280,9 @@ if (setup) then
          end if        
       end do
       close(38)
-   end do
- 
 
+   end do
+   write(*,*) "Input for all chunks written!"
 end if        
 !
 !    MODE B -------------------
