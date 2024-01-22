@@ -11,7 +11,7 @@
 program mlff_select
 implicit none
 integer::i,j,k,l   ! loop indices
-integer::inc  ! incremented index
+integer::inc,inc2,inc3  ! incremented index
 integer::readstat
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
@@ -21,25 +21,38 @@ integer::nelems  ! current number of elements
 integer::nelems_all  ! total number of different elements
 integer::nelems_glob  ! number of elements in current ML_AB
 integer::ind_act ! current element index
+integer::max_environ  ! maximum number of atoms in environment
+integer::max_around  ! maximum actual number of atoms around
+integer::ngrid  ! number of grid points for RDF calculation
 integer,allocatable::natoms(:)  ! atom numbers of configurations
 real(kind=8),allocatable::xyz(:,:,:) ! the geometries
 real(kind=8),allocatable::xyz_dir(:,:,:) ! the geometries (direct coords)
 real(kind=8),allocatable::cells(:,:,:) ! the unit cells
+real(kind=8),allocatable::angles(:)  ! list of angles for current environment
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
 integer::ind_list(50)   ! list of different element indices
 character(len=2),allocatable::el_list(:)  ! current list of elements
 character(len=2)::el_list_glob(50)  ! global list of elements 
+character(len=2)::el_act   ! the current element symbol for printing
 real(kind=8),allocatable::energies(:)  ! the energies 
 real(kind=8),allocatable::grads(:,:,:)  ! the gradient vectors
+real(kind=8),allocatable::environ(:,:,:)  ! the local environment of each atom
+real(kind=8),allocatable::dist_list(:)  ! list of distances in environment
+real(kind=8),allocatable::rdf_all(:,:)  ! radial distribution functions for atoms
 real(kind=8)::cell_inv(3,3)  ! inverted coordinate unit cell
 real(kind=8)::dist_act   ! scalar distance between two atoms
 real(kind=8)::cutoff    ! the distance cutoff during the ML-FF learning
 real(kind=8)::dist_vec(3)  ! distance vector between two atoms
+real(kind=8)::dx   ! distance between two gridpoints (RDF)
+real(kind=8)::alpha   ! exponent for RDF Gaussian functions
+real(kind=8)::x_act   ! current x-value for RDF buildup
 integer,allocatable::el_nums(:)  ! current numbers of elements
 integer,allocatable::confnum_all(:)  ! numbers of configurations 
 integer,allocatable::nat_all(:) ! number of atom in configurations
 integer,allocatable::ind_all(:)  ! element indices of all atoms
 integer,allocatable::num_around(:,:) ! number of atoms around the atom
+integer,allocatable::ind_env(:,:)  ! core charges of atoms in environments
+
 
 real(kind=8),allocatable::gradnorm_all(:)  ! gradient forms for all atoms
 
@@ -67,6 +80,22 @@ el_list_glob="XX"
 !
 ind_list=0
 nelems_all=0
+!
+!     Maximum number of atoms in environment (assumed)
+!
+max_environ=100
+!
+!     Number of grid points of numerical radial distribution functions
+!
+ngrid=500
+!
+!     Length between two x values on grid
+!
+dx=cutoff/real(ngrid)
+!
+!     Exponent for RDF gaussian
+!
+alpha=20.0
 !
 !     Open the ML_AB file and check if it's there
 !
@@ -199,7 +228,7 @@ do
       call matinv3(cells(:,:,act_conf),cell_inv)
       do i=1,natoms(act_conf)
          xyz_dir(:,i,act_conf)=xyz(1,i,act_conf)*cell_inv(1,:)+ &
-              & xyz(1,i,act_conf)*cell_inv(2,:)+xyz(3,i,act_conf)*cell_inv(3,:)
+              & xyz(2,i,act_conf)*cell_inv(2,:)+xyz(3,i,act_conf)*cell_inv(3,:)
       end do 
       read(56,*)
       read(56,*)
@@ -242,7 +271,19 @@ allocate(ind_all(natoms_sum))
 allocate(gradnorm_all(natoms_sum))
 !     The number of atoms in the surrounding (sorted by core charges)
 allocate(num_around(nelems,natoms_sum))
+!     The coordinates of atoms in the surrounding (for xyz printout)
+allocate(environ(3,max_environ,natoms_sum))
+!     The core charges/elements of atoms in surrounding
+allocate(ind_env(max_environ,natoms_sum))
+!     The list of distances to atoms within surrounding (local)
+allocate(dist_list(max_environ))
+!     The radial distribution functions around all atoms
+allocate(rdf_all(ngrid,natoms_sum))
+!     The local list of angles in the environment
+allocate(angles(max_environ*max_environ))
+
 num_around=0
+rdf_all=0.d0
 write(*,*) "Total number of atoms (possible basis functions):",natoms_sum
 
 inc=0
@@ -260,8 +301,16 @@ do i=1,conf_num
 !
 !     Calculate the number of atoms in the direct surrounding
 !
+!     The atom itself is located in the origin for environment
+!     If an environment is smaller than the largest one, set all missing
+!     atoms to the origin as well, same element as central atom
+!
+      environ(:,:,inc)=0.d0
+      ind_env(:,inc)=ind_all(inc)
+!
 !     All distances below cutoff
 !
+      inc2=1
       do k=1,natoms(i)
          if (k .ne. j) then
             dist_vec=xyz_dir(:,j,i)-xyz_dir(:,k,i)
@@ -283,32 +332,98 @@ do i=1,conf_num
 !   
 !     Finally, convert distance vector back to cartesian coordinates
 !
-            dist_vec(:)=dist_vec(1)*cells(1,i,act_conf)+dist_vec(2)*cells(2,i,act_conf)+ &
-                       & dist_vec(3)*cells(3,i,act_conf)
+            dist_vec(:)=dist_vec(1)*cells(1,:,act_conf)+dist_vec(2)*cells(2,:,act_conf)+ &
+                       & dist_vec(3)*cells(3,:,act_conf)
 !
 !     Calculate the distance
 !
-            dist_act=sqrt(dot_product(dist_vec,dist_vec))
+            dist_act=sqrt(dot_product(dist_vec,dist_vec))            
 !
 !     Determine if atom is within the cutoff. If yes, add it to the list of 
 !      surrounding atoms
+!      Fill the respective atom (its coordinates and index) into the local 
+!      environment cluster structure
 !
             if (dist_act .lt. cutoff) then
-               write(*,*) "dist",dist_act
                do l=1,nelems_all
-                  if (inds(k,i) .eq. ind_list(l)) then
+                  if (inds(k,i) .eq. ind_list(l)) then                          
                      num_around(l,inc)=num_around(l,inc)+1
+                     inc2=inc2+1
+                     environ(:,inc2,inc)=-dist_vec(:)
+                     ind_env(inc2,inc)=inds(k,i)
+                     dist_list(inc2-1)=dist_act
                   end if
                end do
-            end if
+            end if            
          end if
       end do
-      write(*,*) num_around(:,inc)
-      stop "Gupgu"
+!
+!     Generate radial distribution function for current environment
+!      Precompute it for each atom!
+!
+      do k=1,ngrid
+         do l=2,inc2-1
+            x_act=k*dx
+            rdf_all(k,inc)=rdf_all(k,inc)+exp(-alpha*(x_act-dist_list(l))**2)
+         end do 
+      end do  
+!
+!     Normalize radial distribution function to number of atoms
+!
+      rdf_all(:,inc)=rdf_all(:,inc)/(inc2-1)
+!
+!     Generate angular distribution function for current environment
+!     
+      inc3=1
+      do k=2,inc2-1
+         do l=k+1,inc2-1
+            angles(inc3)=acos(dot_product(environ(:,k,inc),environ(:,k,inc))/&
+                            &sqrt(dist_list(k-1)**2*dist_list(l-1)**2))    
+            inc3=inc3+1        
+         end do
+      end do   
+
+      do k=l+1,ngrid
+         x_act=k*dx         
+
+      end do
+!
+
+     ! write(*,*) num_around(:,inc)
+     ! stop "Gupgu"
 
    end do
 end do
 
+
+!
+!     Write local environments to trajectory file
+!
+max_around=maxval(sum(num_around,dim=1)) 
+open(unit=56,file="environments.xyz",status="replace")
+do i=1,1000
+   write(56,*) max_around
+   write(56,'(a,i8)') " environment No. ",i
+   do j=1,max_around
+      call atomname(ind_env(j,i),el_act) 
+      write(56,*) el_act,environ(:,j,i)
+   end do  
+
+end do
+close(56)
+
+!
+!     Test write out for radial distribution functions
+!
+open(unit=57,file="rdf_test.dat",status="replace")
+do i=1,ngrid
+   write(57,*) i*dx,rdf_all(i,1:5)
+end do
+close(57)
+
+write(*,*)
+write(*,*) "File 'environments.xyz' with local environments written."
+write(*,*)
 
 
 end program mlff_select
@@ -317,7 +432,7 @@ end program mlff_select
 !     subroutine elem: read in character with element symbol and
 !       give out the number
 !
-!     part of QMDFF
+!     part of QMDFF (taken from Caracal)
 !
 subroutine elem(key1, nat)
 IMPLICIT DOUBLE PRECISION (A-H,O-Z)
@@ -365,6 +480,43 @@ END DO
 
 return
 end subroutine elem
+
+!
+!     subroutine atomname: is an atomic charge is given, extract the
+!        corresponding element label
+!
+!     part of EVB
+!
+subroutine atomname(nat,key1)
+implicit none
+CHARACTER(len=2)::KEY1  ! the name of the element
+CHARACTER(len=2)::ELEMNT(107)  ! array with all names
+integer::nat  ! atomic charge
+
+DATA ELEMNT/'h ','he', &
+ & 'li','be','b ','c ','n ','o ','f ','ne', &
+ & 'na','mg','al','si','p ','s ','cl','ar', &
+ & 'k ','ca','sc','ti','v ','cr','mn','fe','co','ni','cu', &
+ & 'zn','ga','ge','as','se','br','kr', &
+ & 'rb','sr','y ','zr','nb','mo','tc','ru','rh','pd','ag', &
+ & 'cd','in','sn','sb','te','i ','xe', &
+ & 'cs','ba','la','ce','pr','nd','pm','sm','eu','gd','tb','dy', &
+ & 'ho','er','tm','yb','lu','hf','ta','w ','re','os','ir','pt', &
+ & 'au','hg','tl','pb','bi','po','at','rn', &
+ & 'fr','ra','ac','th','pa','u ','np','pu','am','cm','bk','cf','xx', &
+ & 'fm','md','cb','xx','xx','xx','xx','xx'/
+
+!
+!     Return the i'th entry of the elements array of i is the given
+!     atomic charge of the atom
+!
+key1=elemnt(nat)
+
+
+return
+end subroutine atomname
+
+
 
 !
 !    subroutine matinv3: inversion of 3x3 matrices
