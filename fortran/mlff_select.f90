@@ -13,6 +13,7 @@ implicit none
 integer::i,j,k,l   ! loop indices
 integer::inc,inc2,inc3  ! incremented index
 integer::readstat
+integer::nbasis  ! desired number of local refs. in new ML_AB
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
 integer::natoms_max  ! maximum number of atoms per configuration
@@ -34,25 +35,32 @@ integer::ind_list(50)   ! list of different element indices
 character(len=2),allocatable::el_list(:)  ! current list of elements
 character(len=2)::el_list_glob(50)  ! global list of elements 
 character(len=2)::el_act   ! the current element symbol for printing
+character(len=120)::arg  ! command line argument
+real(kind=8)::train_div   ! desired trainset diversity (0: none, 1: full)
 real(kind=8),allocatable::energies(:)  ! the energies 
 real(kind=8),allocatable::grads(:,:,:)  ! the gradient vectors
 real(kind=8),allocatable::environ(:,:,:)  ! the local environment of each atom
 real(kind=8),allocatable::dist_list(:)  ! list of distances in environment
 real(kind=8),allocatable::rdf_all(:,:)  ! radial distribution functions for atoms
+real(kind=8),allocatable::adf_all(:,:)  ! angular distribution functions for atoms
 real(kind=8)::cell_inv(3,3)  ! inverted coordinate unit cell
 real(kind=8)::dist_act   ! scalar distance between two atoms
 real(kind=8)::cutoff    ! the distance cutoff during the ML-FF learning
 real(kind=8)::dist_vec(3)  ! distance vector between two atoms
 real(kind=8)::dx   ! distance between two gridpoints (RDF)
-real(kind=8)::alpha   ! exponent for RDF Gaussian functions
+real(kind=8)::da   ! distance between two gridpoints (ADF)
+real(kind=8)::alpha_r   ! exponent for RDF Gaussian functions
+real(kind=8)::alpha_a   ! exponent for ADF Gaussian functions
 real(kind=8)::x_act   ! current x-value for RDF buildup
+real(kind=8)::pi  ! the Pi
 integer,allocatable::el_nums(:)  ! current numbers of elements
 integer,allocatable::confnum_all(:)  ! numbers of configurations 
 integer,allocatable::nat_all(:) ! number of atom in configurations
 integer,allocatable::ind_all(:)  ! element indices of all atoms
 integer,allocatable::num_around(:,:) ! number of atoms around the atom
 integer,allocatable::ind_env(:,:)  ! core charges of atoms in environments
-
+integer,allocatable::neigh_global(:,:)  ! list with numbers of neighbors (global)
+logical::eval_stat(10)  ! the progress for evaluation loops
 
 real(kind=8),allocatable::gradnorm_all(:)  ! gradient forms for all atoms
 
@@ -66,7 +74,67 @@ write(*,*) " machine-learning force field from a given ML-AB file."
 write(*,*) "The procedure is similar to the VASP command ML_MODE = select,"
 write(*,*) " but is faster (since purely based on geometrical comparisons)"
 write(*,*) " and has more options to be adjusted (global approach)"
+write(*,*) "Usage: mlff_select -nbasis=[number], where [number] = desired"
+write(*,*) " number of local reference configurations (basis functions) "
+write(*,*) " per element in the newly written ML_AB file."
 write(*,*)
+
+
+!
+!     Read in command line arguments
+!
+!     The desired number of reference environments (basis functions)
+!
+nbasis=0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:8))  .eq. "-nbasis=") then
+      read(arg(9:),*,iostat=readstat) nbasis
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -nbasis=[number] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (nbasis .lt. 1) then
+   write(*,*) "Please give the number of local reference configurations after selection"
+   write(*,*) " with the keyword -nbasis=[number]! Recommended are 2000-6000"
+   write(*,*)
+   stop
+end if       
+!
+!     The training set diversity (1: max, 0 min)
+!
+train_div=-1.d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:11))  .eq. "-train_div=") then
+      read(arg(12:),*,iostat=readstat) nbasis
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -train_div=[value] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (nbasis .lt. 0.0 .or. train_div .gt. 1.0) then
+   write(*,*) "Please give the desired trainset diversity with the keyword -train_div=[value]"
+   write(*,*) " where the maximum diversity is 1.0 and the minimum is 0.0"
+   write(*,*)
+   stop
+end if
+
+
+
+
+
+write(*,'(a,i7)') " Number of desired local reference configuraitons per element:",nbasis
+
+!
+!     Define the Pi
+!
+pi=4d0*atan(1.0d0)
 !
 !     Default value for the cutoff: 5 Ang
 !
@@ -89,13 +157,21 @@ max_environ=100
 !
 ngrid=500
 !
-!     Length between two x values on grid
+!     Length between two x values on RDF grid (Ang.)
 !
 dx=cutoff/real(ngrid)
 !
-!     Exponent for RDF gaussian
+!     Length between two angle values on ADF grid (degrees)
 !
-alpha=20.0
+da=180.d0/real(ngrid)
+!
+!     Exponent for RDF Gaussian
+!
+alpha_r=20.0
+!
+!     Exponent for ADF Gaussian
+!
+alpha_a=0.5d0
 !
 !     Open the ML_AB file and check if it's there
 !
@@ -104,6 +180,7 @@ if (readstat .ne. 0) then
    write(*,*) "The file ML_AB could not been found!"
    stop
 end if
+write(*,*) "Read in the ML_AB file..."
 !
 !     Read in the ML_AB file
 !
@@ -251,7 +328,7 @@ do
 
 end do
 close(56)
-
+write(*,*) " ... done!"
 !
 !     Setup classifier arrays for the atoms
 !     All atoms (no matter to which configuation they belong)
@@ -279,15 +356,32 @@ allocate(ind_env(max_environ,natoms_sum))
 allocate(dist_list(max_environ))
 !     The radial distribution functions around all atoms
 allocate(rdf_all(ngrid,natoms_sum))
+!     The angular distribution functions around all atoms
+allocate(adf_all(ngrid,natoms_sum))
 !     The local list of angles in the environment
 allocate(angles(max_environ*max_environ))
+!     The global histogram with the number of neighbors
+allocate(neigh_global(nelems,max_environ))
 
 num_around=0
 rdf_all=0.d0
+adf_all=0.d0
 write(*,*) "Total number of atoms (possible basis functions):",natoms_sum
 
+write(*,*)
+write(*,*) "Calculate classifiers for all atoms in the ML_AB file..."
+eval_stat=.false.
 inc=0
 do i=1,conf_num
+   do j=1,10
+      if (real(i)/real(conf_num) .gt. real(j)*0.1d0) then
+         if (.not. eval_stat(j)) then
+            write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+            eval_stat(j) = .true.
+         end if
+      end if
+   end do
+
    do j=1,natoms(i)
       inc=inc+1
       confnum_all(inc)=conf_num
@@ -362,39 +456,40 @@ do i=1,conf_num
 !      Precompute it for each atom!
 !
       do k=1,ngrid
+         x_act=k*dx
          do l=2,inc2-1
-            x_act=k*dx
-            rdf_all(k,inc)=rdf_all(k,inc)+exp(-alpha*(x_act-dist_list(l))**2)
+            rdf_all(k,inc)=rdf_all(k,inc)+exp(-alpha_r*(x_act-dist_list(l))**2)
          end do 
       end do  
 !
-!     Normalize radial distribution function to number of atoms
+!     Normalize radial distribution function to number of atoms in environment
 !
       rdf_all(:,inc)=rdf_all(:,inc)/(inc2-1)
 !
 !     Generate angular distribution function for current environment
 !     
+      angles=0.d0
       inc3=1
       do k=2,inc2-1
          do l=k+1,inc2-1
-            angles(inc3)=acos(dot_product(environ(:,k,inc),environ(:,k,inc))/&
-                            &sqrt(dist_list(k-1)**2*dist_list(l-1)**2))    
+            angles(inc3)=acos(dot_product(environ(:,k,inc),environ(:,l,inc))/&
+                            &sqrt(dist_list(k-1)**2*dist_list(l-1)**2))*180d0/pi 
             inc3=inc3+1        
          end do
       end do   
-
       do k=l+1,ngrid
-         x_act=k*dx         
-
+         x_act=k*da        
+         do l=1,inc3-1
+            adf_all(k,inc)=adf_all(k,inc)+exp(-alpha_a*(x_act-angles(l))**2)
+         end do
       end do
 !
-
-     ! write(*,*) num_around(:,inc)
-     ! stop "Gupgu"
+!     Normalize angular distribution function to number of angles in enviroment
+!
+      adf_all(:,inc)=adf_all(:,inc)/(inc3-1)
 
    end do
 end do
-
 
 !
 !     Write local environments to trajectory file
@@ -412,6 +507,10 @@ do i=1,1000
 end do
 close(56)
 
+write(*,*)
+write(*,*) "File 'environments.xyz' with local environments written."
+write(*,*)
+
 !
 !     Test write out for radial distribution functions
 !
@@ -421,9 +520,58 @@ do i=1,ngrid
 end do
 close(57)
 
-write(*,*)
-write(*,*) "File 'environments.xyz' with local environments written."
-write(*,*)
+!
+!     Test write out angular distribution functions
+!
+open(unit=58,file="adf_test.dat",status="replace")
+do i=1,ngrid
+   write(58,*) i*da,adf_all(i,1:5)
+end do
+close(58)
+
+
+
+!
+!    Now compare the atoms based on their environments!
+!    To avoid huge scaling with atom number, do the simplest classifications 
+!    first
+!
+!    A: element
+!
+
+
+
+!
+!    B: Total number of neighbors (no matter which element) 
+!
+neigh_global=0
+do i=1,natoms_sum
+   do j=1,nelems
+      if (ind_all(i) .eq. ind_list(j)) then
+         neigh_global(j,sum(num_around(:,i)))=neigh_global(j, &
+                        & sum(num_around(:,i)))+1
+      end if
+   end do           
+end do
+
+open(unit=59,file="neighbor_nums.dat",status="replace")
+write(59,*) "#Here, the number of neighbors around atoms in ML_AB are"
+write(59,*) "#summed and packed into bins, where the number of atoms with "
+write(59,*) "#with an environment of certain size (total number) is listed,"
+write(59,*) "#sorted by element."
+do i=1,max_environ
+   write(59,*) i,real(neigh_global(:,i))
+
+end do
+
+close(59)
+
+!
+!    C: Neighborhood diversity (multiply numbers of elements within the current 
+!      total neighbor class
+!
+
+
 
 
 end program mlff_select
