@@ -12,8 +12,11 @@ program mlff_select
 implicit none
 integer::i,j,k,l   ! loop indices
 integer::inc,inc2,inc3  ! incremented index
+integer,allocatable::incs(:)  ! moredimensional increment
 integer::readstat
 integer::nbasis  ! desired number of local refs. in new ML_AB
+integer::neigh_min_bas  ! minimum number of confs. per neighbor bin
+integer::grad_pre    ! number of basis functions for large gradnorms
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
 integer::natoms_max  ! maximum number of atoms per configuration
@@ -30,6 +33,8 @@ real(kind=8),allocatable::xyz(:,:,:) ! the geometries
 real(kind=8),allocatable::xyz_dir(:,:,:) ! the geometries (direct coords)
 real(kind=8),allocatable::cells(:,:,:) ! the unit cells
 real(kind=8),allocatable::angles(:)  ! list of angles for current environment
+real(kind=8)::grad_min,grad_max  ! minimum and maximum gradient norm (global)
+real(kind=8)::grad_step  ! distance between two gradient bins
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
 integer::ind_list(50)   ! list of different element indices
 character(len=2),allocatable::el_list(:)  ! current list of elements
@@ -37,12 +42,14 @@ character(len=2)::el_list_glob(50)  ! global list of elements
 character(len=2)::el_act   ! the current element symbol for printing
 character(len=120)::arg  ! command line argument
 real(kind=8)::train_div   ! desired trainset diversity (0: none, 1: full)
+real(kind=8)::grad_frac   ! desired fraction of basis functions for large gradnorm
 real(kind=8),allocatable::energies(:)  ! the energies 
 real(kind=8),allocatable::grads(:,:,:)  ! the gradient vectors
 real(kind=8),allocatable::environ(:,:,:)  ! the local environment of each atom
 real(kind=8),allocatable::dist_list(:)  ! list of distances in environment
 real(kind=8),allocatable::rdf_all(:,:)  ! radial distribution functions for atoms
 real(kind=8),allocatable::adf_all(:,:)  ! angular distribution functions for atoms
+real(kind=8),allocatable::atsel_grad_val(:,:)  ! gradnorms of largest gradnorms 
 real(kind=8)::cell_inv(3,3)  ! inverted coordinate unit cell
 real(kind=8)::dist_act   ! scalar distance between two atoms
 real(kind=8)::cutoff    ! the distance cutoff during the ML-FF learning
@@ -60,6 +67,10 @@ integer,allocatable::ind_all(:)  ! element indices of all atoms
 integer,allocatable::num_around(:,:) ! number of atoms around the atom
 integer,allocatable::ind_env(:,:)  ! core charges of atoms in environments
 integer,allocatable::neigh_global(:,:)  ! list with numbers of neighbors (global)
+integer,allocatable::neigh_bas(:,:)  ! number of basis functions per environment
+integer,allocatable::grad_histo(:)   ! histogram with gradient norm ranges
+integer,allocatable::final_choice(:,:)  ! the final selection of basis functions
+integer,allocatable::atsel_grad(:,:)  ! the atom indices of the largest gradnorms
 logical::eval_stat(10)  ! the progress for evaluation loops
 
 real(kind=8),allocatable::gradnorm_all(:)  ! gradient forms for all atoms
@@ -74,9 +85,20 @@ write(*,*) " machine-learning force field from a given ML-AB file."
 write(*,*) "The procedure is similar to the VASP command ML_MODE = select,"
 write(*,*) " but is faster (since purely based on geometrical comparisons)"
 write(*,*) " and has more options to be adjusted (global approach)"
-write(*,*) "Usage: mlff_select -nbasis=[number], where [number] = desired"
-write(*,*) " number of local reference configurations (basis functions) "
-write(*,*) " per element in the newly written ML_AB file."
+write(*,*) "The following settings must be given by command line arguments:"
+write(*,*) " - nbasis=[number] : the [number] is the desired number of local"
+write(*,*) "    reference configurations (basis functions) per element in the"
+write(*,*) "    newly written ML_AB file."
+write(*,*) " - grad_frac=[value] : percentage of basis functions to be "
+write(*,*) "    allocated for the largest gradient components in the "
+write(*,*) "    references. The [value]*nbasis atoms with the largest "
+write(*,*) "    will be taken all."
+write(*,*) " - train_div=[value] : the training set diversity (maximum: 1.0,"
+write(*,*) "    minimum: 0.0). The larger the value, the higher percentage"
+write(*,*) "    will be chosen based on different number of neighbor atoms,"
+write(*,*) "    such that the tails of the neighbor distribution will be "
+write(*,*) "    will be weighted larger (larger diversity)"
+write(*,*) "Usage: mlff_select [list of command line arguments]"
 write(*,*)
 
 
@@ -102,7 +124,30 @@ if (nbasis .lt. 1) then
    write(*,*) " with the keyword -nbasis=[number]! Recommended are 2000-6000"
    write(*,*)
    stop
-end if       
+end if
+!
+!     The fraction of basis functions based on the largest gradient norms
+!
+grad_frac=-1.d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:11))  .eq. "-grad_frac=") then
+      read(arg(12:),*,iostat=readstat) grad_frac
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -grad_frac=[value] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (grad_frac .lt. 0.0 .or. grad_frac .gt. 1.0) then
+   write(*,*) "Please give the desired fraction of basis functions for the largest "
+   write(*,*) " gradient norm atoms with the keyword -grad_frac=[value]"
+   write(*,*) " where the maximum fraction is 1.0 (all) and the minimum is 0.0 (none)"
+   write(*,*)
+   stop
+end if
+
 !
 !     The training set diversity (1: max, 0 min)
 !
@@ -110,7 +155,7 @@ train_div=-1.d0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:11))  .eq. "-train_div=") then
-      read(arg(12:),*,iostat=readstat) nbasis
+      read(arg(12:),*,iostat=readstat) train_div
       if (readstat .ne. 0) then
          write(*,*) "The format of the -train_div=[value] command seems to be corrupted!"
          write(*,*)
@@ -118,18 +163,20 @@ do i = 1, command_argument_count()
       end if
    end if
 end do
-if (nbasis .lt. 0.0 .or. train_div .gt. 1.0) then
+if (train_div .lt. 0.0 .or. train_div .gt. 1.0) then
    write(*,*) "Please give the desired trainset diversity with the keyword -train_div=[value]"
    write(*,*) " where the maximum diversity is 1.0 and the minimum is 0.0"
    write(*,*)
    stop
 end if
-
-
-
+!
+!     Number of basis functions allocated to minimum into different neighbor bins 
+!
+neigh_min_bas=int(nbasis*train_div)
 
 
 write(*,'(a,i7)') " Number of desired local reference configuraitons per element:",nbasis
+write(*,'(a,i7)') " Number of configurations allocated uniformly for neighbor-bins:",neigh_min_bas
 
 !
 !     Define the Pi
@@ -338,6 +385,8 @@ write(*,*) " ... done!"
 !
 !     Total number of atoms within any of the configurations
 natoms_sum=sum(natoms)
+!     The nelems-dimensional increment array
+allocate(incs(nelems))
 !     The configuration number of the element
 allocate(confnum_all(natoms_sum))
 !     The atom number in the respective configuration
@@ -362,6 +411,14 @@ allocate(adf_all(ngrid,natoms_sum))
 allocate(angles(max_environ*max_environ))
 !     The global histogram with the number of neighbors
 allocate(neigh_global(nelems,max_environ))
+!     Number of basis functions per environment
+allocate(neigh_bas(nelems,max_environ))
+!     Number of atoms with gradient components in certain range
+allocate(grad_histo(100))
+!     The FINAL choice of basis functions!
+allocate(final_choice(nbasis,nelems))
+
+
 
 num_around=0
 rdf_all=0.d0
@@ -372,7 +429,7 @@ write(*,*)
 write(*,*) "Calculate classifiers for all atoms in the ML_AB file..."
 eval_stat=.false.
 inc=0
-do i=1,conf_num
+do i=1,50!conf_num
    do j=1,10
       if (real(i)/real(conf_num) .gt. real(j)*0.1d0) then
          if (.not. eval_stat(j)) then
@@ -529,6 +586,72 @@ do i=1,ngrid
 end do
 close(58)
 
+!
+!    GRADIENT EXTREMA PRESELECTION:
+!    Determine histogram of gradient norms for all atoms, allocate them into
+!    bins according to their gradient norms
+!    Choose the nbasis*grad_frac atoms with the largest gradient norms
+!
+!    The number of atoms preselected due to large gradient components
+!
+grad_pre=int(nbasis*grad_frac)
+allocate(atsel_grad(grad_pre,nelems))
+allocate(atsel_grad_val(grad_pre,nelems))
+
+write(*,*) "grad_pre",grad_pre
+
+grad_min=minval(gradnorm_all)
+grad_max=maxval(gradnorm_all)
+grad_step=(grad_max-grad_min)/100.d0
+grad_histo=0
+
+outer2: do i=1,natoms_sum
+   inner2: do j=1,100
+      if (gradnorm_all(i) .lt. j*grad_step) then
+         grad_histo(j)=grad_histo(j)+1
+         exit inner2
+      end if
+   end do inner2
+end do outer2
+!
+!    Write distributions of gradient norms to file
+!
+open(unit=60,file="grad_histo.dat",status="replace")
+write(60,*) "#Here, the number of atoms with gradient norms in a certain"
+write(60,*) "#range (x-coordinate) are listed."
+do i=1,100
+   write(60,*) i*grad_step,grad_histo(i)
+
+end do
+close(60)
+
+!
+!    Sort the grad_pre atoms with the largest gradients into an array with
+!    their atom indices, do a max-heap search
+!  
+!    Stored in array: atsel_grad
+!
+
+incs=0
+atsel_grad=0
+atsel_grad_val=0.d0
+
+do
+   inc=maxloc(gradnorm_all,dim=1)
+   do i=1,nelems
+      if (ind_all(inc) .eq. ind_list(i)) then
+         if (incs(i) .lt. grad_pre) then
+            incs(i)=incs(i)+1
+            atsel_grad(incs(i),i)=inc 
+            atsel_grad_val(incs(i),i)=gradnorm_all(inc)
+         end if
+      end if
+   end do
+   if (sum(incs) .eq. nelems*grad_pre) then
+      exit
+   end if
+   gradnorm_all(inc)=0.d0
+end do
 
 
 !
@@ -553,17 +676,43 @@ do i=1,natoms_sum
       end if
    end do           
 end do
+!
+!    Fill diversity-dependent minimum number of allocated basis functions
+!      into different neighbor bins (each bin one, until full or all atoms
+!      allocated, line per line)
+!
 
+neigh_bas=0
+do_elems: do i=1,nelems
+   inc=0
+   do_column:  do
+      do_environ: do j=1,max_environ
+         inc=inc+1
+         if (inc .gt. neigh_min_bas) exit do_column
+         if (neigh_bas(i,j) .lt. neigh_global(i,j)) then
+            neigh_bas(i,j)=neigh_bas(i,j)+1
+         end if
+      end do do_environ
+   end do do_column
+end do do_elems
+
+!
+!    Subdivide the number of neighbor bins into regions based on neighborhood
+!    diversity (how many of the different elements are within the neighborhood)
+!
+
+!
+!    Write distribution of neighbor numbers to file
+!
 open(unit=59,file="neighbor_nums.dat",status="replace")
 write(59,*) "#Here, the number of neighbors around atoms in ML_AB are"
 write(59,*) "#summed and packed into bins, where the number of atoms with "
 write(59,*) "#with an environment of certain size (total number) is listed,"
 write(59,*) "#sorted by element."
 do i=1,max_environ
-   write(59,*) i,real(neigh_global(:,i))
+   write(59,*) i,real(neigh_global(:,i)),real(neigh_bas(:,i))
 
 end do
-
 close(59)
 
 !
