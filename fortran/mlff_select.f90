@@ -10,12 +10,15 @@
 !
 program mlff_select
 implicit none
-integer::i,j,k,l   ! loop indices
-integer::inc,inc2,inc3  ! incremented index
+integer::i,j,k,l,m   ! loop indices
+integer::inc,inc2,inc3,inc4  ! incremented index
+integer::inc_remain  ! remainder index for basis functions
 integer,allocatable::incs(:)  ! moredimensional increment
 integer::readstat
 integer::nbasis  ! desired number of local refs. in new ML_AB
 integer::neigh_min_bas  ! minimum number of confs. per neighbor bin
+integer::nbas_grad  ! number of basis functions for max.  gradient comps
+integer::neigh_classes ! number of neighborhood subdivision classes
 integer::grad_pre    ! number of basis functions for large gradnorms
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
@@ -28,6 +31,8 @@ integer::ind_act ! current element index
 integer::max_environ  ! maximum number of atoms in environment
 integer::max_around  ! maximum actual number of atoms around
 integer::ngrid  ! number of grid points for RDF calculation
+integer::spots_avail  ! number of basis functions for final k-means
+integer::remain_class  ! index of the remainder class for basis functions
 integer,allocatable::natoms(:)  ! atom numbers of configurations
 real(kind=8),allocatable::xyz(:,:,:) ! the geometries
 real(kind=8),allocatable::xyz_dir(:,:,:) ! the geometries (direct coords)
@@ -35,12 +40,15 @@ real(kind=8),allocatable::cells(:,:,:) ! the unit cells
 real(kind=8),allocatable::angles(:)  ! list of angles for current environment
 real(kind=8)::grad_min,grad_max  ! minimum and maximum gradient norm (global)
 real(kind=8)::grad_step  ! distance between two gradient bins
+real(kind=8)::normfac   ! normalizaion factor for RDFs and ADFs
+real(kind=8)::rdum   ! dummy real number
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
 integer::ind_list(50)   ! list of different element indices
 character(len=2),allocatable::el_list(:)  ! current list of elements
 character(len=2)::el_list_glob(50)  ! global list of elements 
 character(len=2)::el_act   ! the current element symbol for printing
 character(len=120)::arg  ! command line argument
+character(len=20)::bas_scale   ! linear or sqare root scaling of basis classes
 real(kind=8)::train_div   ! desired trainset diversity (0: none, 1: full)
 real(kind=8)::grad_frac   ! desired fraction of basis functions for large gradnorm
 real(kind=8),allocatable::energies(:)  ! the energies 
@@ -50,6 +58,7 @@ real(kind=8),allocatable::dist_list(:)  ! list of distances in environment
 real(kind=8),allocatable::rdf_all(:,:)  ! radial distribution functions for atoms
 real(kind=8),allocatable::adf_all(:,:)  ! angular distribution functions for atoms
 real(kind=8),allocatable::atsel_grad_val(:,:)  ! gradnorms of largest gradnorms 
+real(kind=8),allocatable::rdf_tmp(:,:)  ! temporary RDF array
 real(kind=8)::cell_inv(3,3)  ! inverted coordinate unit cell
 real(kind=8)::dist_act   ! scalar distance between two atoms
 real(kind=8)::cutoff    ! the distance cutoff during the ML-FF learning
@@ -59,6 +68,7 @@ real(kind=8)::da   ! distance between two gridpoints (ADF)
 real(kind=8)::alpha_r   ! exponent for RDF Gaussian functions
 real(kind=8)::alpha_a   ! exponent for ADF Gaussian functions
 real(kind=8)::x_act   ! current x-value for RDF buildup
+real(kind=8)::rdf_overlap  ! the current RDF overlap integral
 real(kind=8)::pi  ! the Pi
 integer,allocatable::el_nums(:)  ! current numbers of elements
 integer,allocatable::confnum_all(:)  ! numbers of configurations 
@@ -71,7 +81,13 @@ integer,allocatable::neigh_bas(:,:)  ! number of basis functions per environment
 integer,allocatable::grad_histo(:)   ! histogram with gradient norm ranges
 integer,allocatable::final_choice(:,:)  ! the final selection of basis functions
 integer,allocatable::atsel_grad(:,:)  ! the atom indices of the largest gradnorms
+integer,allocatable::neighnum_global(:)  ! sum of all neighbors for all atoms
+integer,allocatable::neigh_div1(:,:),neigh_div2(:,:)  ! the neighborhood diversities
+integer,allocatable::basis_sizes(:)  ! sizes of all basis classes (per element)
+integer,allocatable::basis_classes(:,:)  ! list of atoms in each basis class
+integer,allocatable::k_number(:)   ! list of k-means spots for basis classes
 logical::eval_stat(10)  ! the progress for evaluation loops
+logical,allocatable::atom_used(:)  ! boolean mask for blocking of treated atoms
 
 real(kind=8),allocatable::gradnorm_all(:)  ! gradient forms for all atoms
 
@@ -86,18 +102,29 @@ write(*,*) "The procedure is similar to the VASP command ML_MODE = select,"
 write(*,*) " but is faster (since purely based on geometrical comparisons)"
 write(*,*) " and has more options to be adjusted (global approach)"
 write(*,*) "The following settings must be given by command line arguments:"
-write(*,*) " - nbasis=[number] : the [number] is the desired number of local"
+write(*,*) " -nbasis=[number] : the [number] is the desired number of local"
 write(*,*) "    reference configurations (basis functions) per element in the"
 write(*,*) "    newly written ML_AB file."
-write(*,*) " - grad_frac=[value] : percentage of basis functions to be "
+write(*,*) " -grad_frac=[value] : percentage of basis functions to be "
 write(*,*) "    allocated for the largest gradient components in the "
 write(*,*) "    references. The [value]*nbasis atoms with the largest "
 write(*,*) "    will be taken all."
-write(*,*) " - train_div=[value] : the training set diversity (maximum: 1.0,"
+write(*,*) " -train_div=[value] : the training set diversity (maximum: 1.0,"
 write(*,*) "    minimum: 0.0). The larger the value, the higher percentage"
 write(*,*) "    will be chosen based on different number of neighbor atoms,"
 write(*,*) "    such that the tails of the neighbor distribution will be "
 write(*,*) "    will be weighted larger (larger diversity)"
+write(*,*) " -neigh_classes=[number] : Number of diversity-based neighborhood"
+write(*,*) "    classes (per number of atoms in the environment, the number"
+write(*,*) "    subdivisions, sorted by the diversity (respect to elements)"
+write(*,*) "    of the neighborhoods"
+write(*,*) " -bas_scale=('linear' or 'root') : How the number of basis functions"
+write(*,*) "    allocated to a certain neighborhood class shall scale with"
+write(*,*) "    the number of atoms contained into it."
+write(*,*) "    possibe are: 'linear' (linear scaling) or 'root' (square root"
+write(*,*) "    scaling). The linear scaling will give more spots to classes "
+write(*,*) "    with many atoms, whereas the root scaling will favor those"
+write(*,*) "    with lower number of atoms."
 write(*,*) "Usage: mlff_select [list of command line arguments]"
 write(*,*)
 
@@ -169,6 +196,55 @@ if (train_div .lt. 0.0 .or. train_div .gt. 1.0) then
    write(*,*)
    stop
 end if
+
+!
+!     The number of neighborhood classes
+!
+neigh_classes=0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:15))  .eq. "-neigh_classes=") then
+      read(arg(16:),*,iostat=readstat) neigh_classes
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -neigh_classes=[number] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (neigh_classes .lt. 1) then
+   write(*,*) "Please give the number of neighborhood classes based on their element "
+   write(*,*) " diversities with the keyword -neigh_classes=[number], where the number"
+   write(*,*) " of classes must be 1 (no subdividing) or larger."
+   write(*,*)
+   stop
+end if
+
+!
+!     If the number of basis functions for the neighborhood classes shall be scaling
+!      linear or square root with the number of contained atoms
+!
+bas_scale="none"
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:11))  .eq. "-bas_scale=") then
+      read(arg(12:),*,iostat=readstat) bas_scale
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -bas_scale=(linear or root) command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if ((bas_scale .ne. "linear") .and. (bas_scale .ne. "root")) then
+   write(*,*) "Please decide if the number of basis functions per neighborhood class shall "
+   write(*,*) " scale linearly or square root wise with the number of contained atoms."
+   write(*,*) " Linear scaling: -bas_scale=linear"
+   write(*,*) " Square root scaling: -bas_scale=root"
+   write(*,*)
+   stop
+end if
+
 !
 !     Number of basis functions allocated to minimum into different neighbor bins 
 !
@@ -222,7 +298,7 @@ alpha_a=0.5d0
 !
 !     Open the ML_AB file and check if it's there
 !
-open(unit=56,file="ML_AB",iostat=readstat)
+open(unit=56,file="ML_AB",status="old",iostat=readstat)
 if (readstat .ne. 0) then
    write(*,*) "The file ML_AB could not been found!"
    stop
@@ -233,7 +309,11 @@ write(*,*) "Read in the ML_AB file..."
 !
 !     First, read in the header and determine number of atoms and 
 !      configurations
-read(56,*)
+read(56,*,iostat=readstat)
+if (readstat .ne. 0) then
+   write(*,*) "The file ML_AB seems to be empty!"
+   stop
+end if
 read(56,*)
 read(56,*)
 read(56,*)
@@ -389,6 +469,8 @@ natoms_sum=sum(natoms)
 allocate(incs(nelems))
 !     The configuration number of the element
 allocate(confnum_all(natoms_sum))
+!     Boolean mask, if atom was already allocated to final basis
+allocate(atom_used(natoms_sum))
 !     The atom number in the respective configuration
 allocate(nat_all(natoms_sum))
 !     The element index (core charge) of each atom
@@ -415,8 +497,14 @@ allocate(neigh_global(nelems,max_environ))
 allocate(neigh_bas(nelems,max_environ))
 !     Number of atoms with gradient components in certain range
 allocate(grad_histo(100))
+!     The sum of all neighbors around all atoms
+allocate(neighnum_global(natoms_sum))
+
+
 !     The FINAL choice of basis functions!
 allocate(final_choice(nbasis,nelems))
+
+
 
 
 
@@ -429,7 +517,7 @@ write(*,*)
 write(*,*) "Calculate classifiers for all atoms in the ML_AB file..."
 eval_stat=.false.
 inc=0
-do i=1,50!conf_num
+do i=1,conf_num
    do j=1,10
       if (real(i)/real(conf_num) .gt. real(j)*0.1d0) then
          if (.not. eval_stat(j)) then
@@ -510,18 +598,21 @@ do i=1,50!conf_num
       end do
 !
 !     Generate radial distribution function for current environment
-!      Precompute it for each atom!
+!      Precompute it for each atom and normalize its integral!
 !
+      normfac=0.d0
       do k=1,ngrid
          x_act=k*dx
          do l=2,inc2-1
             rdf_all(k,inc)=rdf_all(k,inc)+exp(-alpha_r*(x_act-dist_list(l))**2)
-         end do 
-      end do  
+         end do
+         normfac=normfac+rdf_all(k,inc)*rdf_all(k,inc)*dx
+      end do 
 !
-!     Normalize radial distribution function to number of atoms in environment
+!     Normalize its integral to become 1
 !
-      rdf_all(:,inc)=rdf_all(:,inc)/(inc2-1)
+      rdf_all(:,inc)=rdf_all(:,inc)/sqrt(normfac)
+
 !
 !     Generate angular distribution function for current environment
 !     
@@ -533,21 +624,26 @@ do i=1,50!conf_num
                             &sqrt(dist_list(k-1)**2*dist_list(l-1)**2))*180d0/pi 
             inc3=inc3+1        
          end do
-      end do   
-      do k=l+1,ngrid
+      end do  
+      normfac=0.d0 
+      do k=1,ngrid
          x_act=k*da        
          do l=1,inc3-1
             adf_all(k,inc)=adf_all(k,inc)+exp(-alpha_a*(x_act-angles(l))**2)
          end do
+         normfac=normfac+adf_all(k,inc)*adf_all(k,inc)*da
       end do
 !
-!     Normalize angular distribution function to number of angles in enviroment
+!     Normalize its integral to become 1
 !
-      adf_all(:,inc)=adf_all(:,inc)/(inc3-1)
+      adf_all(:,inc)=adf_all(:,inc)/sqrt(normfac)
 
    end do
 end do
-
+!
+!     All atoms are still available
+!
+atom_used=.true.
 !
 !     Write local environments to trajectory file
 !
@@ -587,7 +683,7 @@ end do
 close(58)
 
 !
-!    GRADIENT EXTREMA PRESELECTION:
+!    A: GRADIENT EXTREMA PRESELECTION:
 !    Determine histogram of gradient norms for all atoms, allocate them into
 !    bins according to their gradient norms
 !    Choose the nbasis*grad_frac atoms with the largest gradient norms
@@ -598,7 +694,6 @@ grad_pre=int(nbasis*grad_frac)
 allocate(atsel_grad(grad_pre,nelems))
 allocate(atsel_grad_val(grad_pre,nelems))
 
-write(*,*) "grad_pre",grad_pre
 
 grad_min=minval(gradnorm_all)
 grad_max=maxval(gradnorm_all)
@@ -635,14 +730,16 @@ close(60)
 incs=0
 atsel_grad=0
 atsel_grad_val=0.d0
-
 do
    inc=maxloc(gradnorm_all,dim=1)
    do i=1,nelems
       if (ind_all(inc) .eq. ind_list(i)) then
          if (incs(i) .lt. grad_pre) then
             incs(i)=incs(i)+1
-            atsel_grad(incs(i),i)=inc 
+            atsel_grad(incs(i),i)=inc
+            atom_used(inc)=.false. 
+!    Store atom indices in final basis set!
+            final_choice(incs(i),i)=inc
             atsel_grad_val(incs(i),i)=gradnorm_all(inc)
          end if
       end if
@@ -652,30 +749,23 @@ do
    end if
    gradnorm_all(inc)=0.d0
 end do
-
-
-!
-!    Now compare the atoms based on their environments!
-!    To avoid huge scaling with atom number, do the simplest classifications 
-!    first
-!
-!    A: element
-!
-
-
-
-!
-!    B: Total number of neighbors (no matter which element) 
+!    
+!    B: THE LOCAL NEIGHBORS: number and diversity, minimum number!
 !
 neigh_global=0
+neighnum_global=0
 do i=1,natoms_sum
-   do j=1,nelems
-      if (ind_all(i) .eq. ind_list(j)) then
-         neigh_global(j,sum(num_around(:,i)))=neigh_global(j, &
-                        & sum(num_around(:,i)))+1
-      end if
-   end do           
+   if (atom_used(i)) then
+      do j=1,nelems
+         if (ind_all(i) .eq. ind_list(j)) then
+            inc=sum(num_around(:,i))
+            neigh_global(j,inc)=neigh_global(j,inc)+1
+            neighnum_global(i)=neighnum_global(i)+inc
+         end if
+      end do     
+   end if      
 end do
+
 !
 !    Fill diversity-dependent minimum number of allocated basis functions
 !      into different neighbor bins (each bin one, until full or all atoms
@@ -691,15 +781,22 @@ do_elems: do i=1,nelems
          if (inc .gt. neigh_min_bas) exit do_column
          if (neigh_bas(i,j) .lt. neigh_global(i,j)) then
             neigh_bas(i,j)=neigh_bas(i,j)+1
+            do_atoms: do k=1,natoms_sum
+!
+!      Allocate chosen atom to final basis set
+!
+               if (atom_used(k)) then
+                  if (neighnum_global(k) .eq. j) then
+                     atom_used(k) = .false.
+                     final_choice(inc,i)=k
+                     exit do_atoms
+                  end if
+               end if
+            end do do_atoms
          end if
       end do do_environ
    end do do_column
 end do do_elems
-
-!
-!    Subdivide the number of neighbor bins into regions based on neighborhood
-!    diversity (how many of the different elements are within the neighborhood)
-!
 
 !
 !    Write distribution of neighbor numbers to file
@@ -715,10 +812,226 @@ do i=1,max_environ
 end do
 close(59)
 
+
+!    
+!     C: THE LOCAL NEIGHBORS: number and diversity, final allocation via 
+!      k-means cluster analysis!
+!      Outer loop over elements: separate calculation for each element!
 !
-!    C: Neighborhood diversity (multiply numbers of elements within the current 
-!      total neighbor class
+do i=1,nelems
 !
+!     Number of available basis functions:
+!
+   write(*,*) "available:",grad_pre,neigh_min_bas
+   inc=0
+   inc3=0
+   do j=1,max_environ
+      if ((neigh_global(i,j)-neigh_bas(i,j)) .gt. 0) then
+         inc=inc+1
+      end if
+   end do
+!
+!    Allocate array with atom classes based on neighborhood size 
+!     and diversity     
+!
+   if (allocated(basis_sizes)) deallocate(basis_sizes)
+   if (allocated(basis_classes)) deallocate(basis_classes)
+   if (allocated(neigh_div1)) deallocate(neigh_div1)
+   if (allocated(neigh_div2)) deallocate(neigh_div2)
+!
+!     Add an extra dimension (+1) as remainder for all classes with less 
+!     then 10 atoms
+!
+   allocate(basis_sizes(inc*neigh_classes+1))
+   allocate(basis_classes(maxval(neigh_global-neigh_bas),inc*neigh_classes+1))
+   allocate(neigh_div1(2,maxval(neigh_global-neigh_bas)))
+   allocate(neigh_div2(2,maxval(neigh_global-neigh_bas)))
+   remain_class=inc*neigh_classes+1
+   inc_remain=0
+   basis_sizes=0
+   basis_classes=0
+!
+!    Subdivide the number of neighbor bins into regions based on neighborhood
+!    diversity (how many of the different elements are within the neighborhood)
+!
+!    Fill local array with product of all numbers of elements in the surrounding
+!
+   inc=0
+   do j=1,max_environ
+      neigh_div1=1
+      neigh_div2=1
+      inc=0
+      do k=1,natoms_sum
+         if (atom_used(k) .and. (ind_all(k) .eq. ind_list(i))) then
+            if (neighnum_global(k) .eq. j) then
+               inc=inc+1
+               neigh_div1(1,inc)=k
+               do l=1,nelems
+                  if (num_around(l,k) .gt. 0) then
+                     neigh_div1(2,inc)=neigh_div1(2,inc)*num_around(l,k)
+                  end if
+               end do
+            end if     
+         end if 
+      end do
+!
+!    Second, sort the array with the surroundings
+!
+      do k=1,inc
+         inc2=maxloc(neigh_div1(2,1:inc),dim=1)
+         neigh_div2(:,k)=neigh_div1(:,inc2)
+         neigh_div1(:,inc2)=1 
+      end do
+!
+!    Third, allocate the atoms into the neighborhood class, and with this 
+!    into the final cluster for the k-means clustering!
+! 
+      if (inc .gt. 0) then
+         inc3=inc3+1
+         inc4=0
+         do k=1,neigh_classes-1
+            if ((inc/neigh_classes) .lt. 10) then
+               basis_sizes(remain_class)=basis_sizes(remain_class)+inc/neigh_classes
+            else
+               basis_sizes((inc3-1)*neigh_classes+k)=inc/neigh_classes  
+            end if
+            if ((inc/neigh_classes) .lt. 10) then
+               do l=1,inc/neigh_classes
+                  inc4=inc4+1
+                  inc_remain=inc_remain+1
+                  basis_classes(inc_remain,remain_class)=neigh_div2(1,inc4)
+               end do
+            else 
+               do l=1,inc/neigh_classes
+                  inc4=inc4+1
+                  basis_classes(l,(inc3-1)*neigh_classes+k)=neigh_div2(1,inc4)
+               end do 
+            end if
+         end do  
+         if ((inc-inc4) .lt. 10) then 
+            basis_sizes(remain_class)=basis_sizes(remain_class)+inc-inc4
+         else
+            basis_sizes(inc3*neigh_classes)=inc-inc4
+         end if
+         if ((inc-inc4) .lt. 10) then
+            do l=1,inc-inc4
+               inc4=inc4+1
+               inc_remain=inc_remain+1
+               basis_classes(inc_remain,inc3*neigh_classes)=neigh_div2(1,inc4)
+            end do            
+         else
+            do l=1,basis_sizes(inc3*neigh_classes)
+               inc4=inc4+1
+               basis_classes(l,inc3*neigh_classes)=neigh_div2(1,inc4)
+            end do
+         end if
+      end if
+   end do
+!
+!    Fourth, determine the number of available spots in the final basis set
+!     for the different local environment diversity classes  
+!
+!     Total number of available spots
+!
+   spots_avail=nbasis-grad_pre-neigh_min_bas
+!
+!     Array with number of spots per neighbor subclass
+!
+   allocate(k_number(size(basis_sizes)))
+!
+   do j=1,size(basis_sizes)
+      if (bas_scale .eq. "linear") then
+         inc=inc+basis_sizes(j)
+      else if (bas_scale .eq. "root") then
+         inc=inc+int(sqrt(real(basis_sizes(j))))
+      end if
+   end do
+
+!
+!     Determine the numbers
+!   
+   do j=1,size(basis_sizes)
+!
+!     Linear scaling with number of atoms
+!
+      if (bas_scale .eq. "linear") then
+         k_number(j)=nint(real(basis_sizes(j))/real(inc)*real(spots_avail))
+
+!
+!     Square root scaling with number of atoms
+!
+      else if (bas_scale .eq. "root") then
+         k_number(j)=nint(sqrt(real(basis_sizes(j)))/real(inc)*real(spots_avail))
+
+      end if
+   end do
+!
+!     If the tota number of basis functions is too high or too low, increase 
+!     or decrease them until the exact number is reached
+!
+   if (sum(k_number(1:size(basis_sizes))) .gt. spots_avail) then
+      inc_remain=sum(k_number(1:size(basis_sizes)))-spots_avail
+      do j=1,size(basis_sizes)
+         if (k_number(j) .gt. 1) then
+            k_number(j) = k_number(j)-1
+            inc_remain=inc_remain-1
+            if (inc_remain .lt. 1) exit
+         end if
+      end do
+   end if
+   if (sum(k_number(1:size(basis_sizes))) .lt. spots_avail) then
+      inc_remain=spots_avail-sum(k_number(1:size(basis_sizes)))
+      do j=1,size(basis_sizes)
+         if (k_number(j) .ge. 1) then
+            k_number(j) = k_number(j)+1
+            inc_remain=inc_remain+1
+            if (inc_remain .gt. -1) exit
+         end if
+      end do
+   end if
+!
+!     Now perform the k-means clustering for each diversity-neighbor 
+!     number group and obtain final choice of atoms for basis set
+!
+   do j=1,size(basis_sizes)
+      if (allocated(rdf_tmp)) deallocate(rdf_tmp)
+      allocate(rdf_tmp(ngrid,basis_sizes(j)))
+      rdf_tmp=0.d0
+      if (k_number(j) .gt. 0) then
+         do k=1,basis_sizes(j)
+            rdum=0.d0
+            do m=1,ngrid
+               rdf_tmp(m,k)=rdf_all(m,basis_classes(k,j))
+               rdum=rdum+rdf_all(m,basis_classes(k,j))               
+            end do
+            write(*,*) k,rdum
+            do l=k,basis_sizes(j)
+!
+!     Calculate radial distribution function (RDF) and angular distribution
+!      function (ADF) overlaps of all atoms in the cluster
+!
+               rdf_overlap=0.d0
+               do m=1,ngrid
+                  rdf_overlap=rdf_overlap+rdf_all(m,basis_classes(k,j))* &
+                              & rdf_all(m,basis_classes(l,j))*dx
+               end do
+
+               write(*,*) k,l,rdf_overlap
+            end do
+         end do
+         do m=1,ngrid
+            write(29,*) m,rdf_tmp(m,:)
+         end do
+         stop "Gupgu"
+      end if
+
+
+   end do
+
+
+   stop "Hiühi"
+end do
+
 
 
 
