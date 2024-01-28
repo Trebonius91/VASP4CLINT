@@ -59,6 +59,7 @@ real(kind=8),allocatable::rdf_all(:,:)  ! radial distribution functions for atom
 real(kind=8),allocatable::adf_all(:,:)  ! angular distribution functions for atoms
 real(kind=8),allocatable::atsel_grad_val(:,:)  ! gradnorms of largest gradnorms 
 real(kind=8),allocatable::rdf_tmp(:,:)  ! temporary RDF array
+real(kind=8),allocatable::mat_overlap(:,:)  ! overlap matrix for RDF combinations
 real(kind=8)::cell_inv(3,3)  ! inverted coordinate unit cell
 real(kind=8)::dist_act   ! scalar distance between two atoms
 real(kind=8)::cutoff    ! the distance cutoff during the ML-FF learning
@@ -86,8 +87,17 @@ integer,allocatable::neigh_div1(:,:),neigh_div2(:,:)  ! the neighborhood diversi
 integer,allocatable::basis_sizes(:)  ! sizes of all basis classes (per element)
 integer,allocatable::basis_classes(:,:)  ! list of atoms in each basis class
 integer,allocatable::k_number(:)   ! list of k-means spots for basis classes
+integer,allocatable::smallest(:)  ! atom list with smallest mutual overlaps
+integer,allocatable::hierarchy(:,:)  ! the time-dependent cluster indices
+integer::mat_coord(2)  ! the current matrix indices
 logical::eval_stat(10)  ! the progress for evaluation loops
 logical,allocatable::atom_used(:)  ! boolean mask for blocking of treated atoms
+!   for Lapack call (matrix diagonalization)
+character(len=1)::JOBZ,UPLO
+integer::Nn,LDA,LDU,LDV,LWORK,INFO
+real(kind=8),dimension(:),allocatable::WORK,W
+real(kind=8),dimension(:,:),allocatable::A_mat
+
 
 real(kind=8),allocatable::gradnorm_all(:)  ! gradient forms for all atoms
 
@@ -917,7 +927,7 @@ do i=1,nelems
             do l=1,inc-inc4
                inc4=inc4+1
                inc_remain=inc_remain+1
-               basis_classes(inc_remain,inc3*neigh_classes)=neigh_div2(1,inc4)
+               basis_classes(inc_remain,remain_class)=neigh_div2(1,inc4)
             end do            
          else
             do l=1,basis_sizes(inc3*neigh_classes)
@@ -994,38 +1004,168 @@ do i=1,nelems
 !     number group and obtain final choice of atoms for basis set
 !
    do j=1,size(basis_sizes)
-      if (allocated(rdf_tmp)) deallocate(rdf_tmp)
-      allocate(rdf_tmp(ngrid,basis_sizes(j)))
-      rdf_tmp=0.d0
+      if (allocated(mat_overlap)) deallocate(mat_overlap)
+      allocate(mat_overlap(basis_sizes(j),basis_sizes(j)))
+      if (allocated(hierarchy)) deallocate(hierarchy)
+      allocate(hierarchy(basis_sizes(j),basis_sizes(j)))
+      mat_overlap=1.1d0
       if (k_number(j) .gt. 0) then
+         if (j .eq. 13) write(*,*) k_number(j)
          do k=1,basis_sizes(j)
-            rdum=0.d0
-            do m=1,ngrid
-               rdf_tmp(m,k)=rdf_all(m,basis_classes(k,j))
-               rdum=rdum+rdf_all(m,basis_classes(k,j))               
-            end do
-            write(*,*) k,rdum
-            do l=k,basis_sizes(j)
+            do l=1,k-1
 !
 !     Calculate radial distribution function (RDF) and angular distribution
 !      function (ADF) overlaps of all atoms in the cluster
+!      Calculate 1-overlap, in order to get the lowest values for the 
+!      largest overlaps (diagonal: zero)
 !
                rdf_overlap=0.d0
                do m=1,ngrid
                   rdf_overlap=rdf_overlap+rdf_all(m,basis_classes(k,j))* &
                               & rdf_all(m,basis_classes(l,j))*dx
                end do
-
-               write(*,*) k,l,rdf_overlap
+               mat_overlap(k,l)=1.d0-rdf_overlap
             end do
+         end do 
+!
+!     Perform the hierarchial clustering of the current RDF overlap matrix
+!
+!     The initial hierarchy: all indices as usual
+!
+         do l=1,basis_sizes(j)
+            hierarchy(l,1)=l
          end do
-         do m=1,ngrid
-            write(29,*) m,rdf_tmp(m,:)
+         write(*,*) hierarchy(:,1)
+         inc2=basis_sizes(j)+1
+         do k=2,basis_sizes(j)
+            do l=1,basis_sizes(j)
+               hierarchy(l,k)=hierarchy(l,k-1)
+            end do
+!
+!     Determine indices with lowest current value and update cluster list
+!
+            mat_coord=minloc(mat_overlap) 
+            hierarchy(mat_coord(1),k)=inc2
+            hierarchy(mat_coord(2),k)=inc2
+            rdum=mat_overlap(mat_coord(1),mat_coord(2))
+!
+!     If the current index is already a cluster, set all of its atoms to the 
+!      new cluster
+!
+            do l=1,basis_sizes(j)
+               if (hierarchy(l,k) .eq. hierarchy(mat_coord(1),k-1)) then
+                  hierarchy(l,k) = inc2
+               end if
+               if (hierarchy(l,k) .eq. hierarchy(mat_coord(2),k-1)) then
+                  hierarchy(l,k) = inc2
+               end if
+            end do
+      
+!
+!     Update all elements in the row and columns of the minloc values to 
+!     the larger values of the respective column/row
+!
+            do l=1,basis_sizes(j)
+               if ((mat_overlap(l,mat_coord(1)) .lt. 1.d0) .and. & 
+                    & (mat_overlap(l,mat_coord(2)) .lt. 1.d0)) then
+                  if (mat_overlap(l,mat_coord(1)) .gt. mat_overlap(l,mat_coord(2))) then
+                     mat_overlap(l,mat_coord(2)) = mat_overlap(l,mat_coord(1))
+                  else
+                     mat_overlap(l,mat_coord(1)) = mat_overlap(l,mat_coord(2))
+                  end if 
+               end if
+            end do
+
+            do l=1,basis_sizes(j)
+               if ((mat_overlap(mat_coord(1),l) .lt. 1.d0) .and. &
+                    & (mat_overlap(mat_coord(2),l) .lt. 1.d0)) then
+                  if (mat_overlap(mat_coord(1),l) .gt. mat_overlap(mat_coord(2),l)) then
+                     mat_overlap(mat_coord(2),l) = mat_overlap(mat_coord(1),l)
+                  else
+                     mat_overlap(mat_coord(1),l) = mat_overlap(mat_coord(2),l)
+                  end if
+               end if
+            end do
+!
+!     Set all values that appear twice or more in the merged cluster to 1.0
+!
+            inc3=1
+            do l=1,basis_sizes(j)
+               if (hierarchy(l,k) .eq. inc2) then
+                  if (inc3 .gt. 1) then
+                     mat_overlap(:,l) = 1.d0
+                  end if
+                  inc3=inc3+1
+               end if
+            end do
+            inc3=1
+            do l=1,basis_sizes(j)
+               if (hierarchy(l,k) .eq. inc2) then
+                  if (inc3 .gt. 1) then
+                     mat_overlap(l,:) = 1.d0
+                  end if
+                  inc3=inc3+1
+               end if
+            end do
+
+            do l=1,basis_sizes(j)
+            write(199,'(12f10.6)') mat_overlap(l,:)
+            end do
+            write(199,*)
+
+            inc2=inc2+1       
+            write(*,'(12i5,f10.6)') hierarchy(:,k),rdum
          end do
-         stop "Gupgu"
+!
+!     Diagonalize overlap matrix
+!
+!         if (allocated(A_mat)) deallocate(A_mat)
+!         if (allocated(W)) deallocate(W)
+!         if (allocated(WORK)) deallocate(WORK)
+!         JOBZ='V' !eigenvalues and eigenvectors(U)
+!         UPLO='U' !upper triangle of a
+!         Nn=basis_sizes(j)
+!         LDA=Nn
+!         INFO=0
+!         LWORK=Nn*Nn-1
+!         allocate(A_mat(Nn,Nn))
+!         allocate(W(Nn))
+!         allocate(WORK(LWORK))
+!         A_mat=mat_overlap
+!         call DSYEV(JOBZ,UPLO,Nn,A_mat,LDA,W,WORK,LWORK,INFO)
+!
+!     Aanalyze eigenvalues and eigenvectors
+!
+!         do k=1,basis_sizes(j)
+!            write(*,*) "value",k,W(k)
+!            do l=1,basis_sizes(j)
+!               write(*,*) l,abs(A_mat(k,l))
+!            end do
+!         end do
+!         A_mat=abs(A_mat)
+!
+!     Calculate overlap sum of largest eigenvector components
+!
+!         if (allocated(smallest)) deallocate(smallest)
+!         allocate(smallest(k_number(k)))         
+!         do k=1,basis_sizes(j)
+!            do l=1,k_number(j)
+!               smallest(l)=maxloc(A_mat(:,k),dim=1) 
+!               A_mat(smallest(l),k)=0.0
+!            end do
+!            write(*,*) k,smallest
+!            rdum=0.d0
+!            do l=1,k_number(j)
+!               do m=1,k_number(j)
+!                  rdum=rdum+mat_overlap(smallest(l),smallest(m))
+!               end do
+!            end do
+!            write(*,*) "summ",rdum
+!
+!         end do
       end if
-
-
+      if (j .eq. 13) stop "GHüuipg"
+      write(*,*) j,basis_sizes(j)
    end do
 
 
