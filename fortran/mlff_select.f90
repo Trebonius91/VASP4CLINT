@@ -15,6 +15,7 @@ integer::inc,inc2,inc3,inc4  ! incremented index
 integer::inc_atom  ! element-global atom position increment (basis set)
 integer::inc_act   ! the current increment
 integer::inc_remain  ! remainder index for basis functions
+integer::mlab_num   ! number of ML_AB files to be read in
 integer,allocatable::incs(:)  ! moredimensional increment
 integer::readstat
 integer::nbasis  ! desired number of local refs. in new ML_AB
@@ -29,7 +30,8 @@ integer::nat_type_max  ! maximum number of atoms per element
 integer::natoms_sum  ! sum of all atoms within all configurations
 integer::nelems  ! current number of elements
 integer::nelems_all  ! total number of different elements
-integer::nelems_glob  ! number of elements in current ML_AB
+integer::nelems_local   ! local number of different elements 
+integer::nelems_glob  ! number of different elements in all ML_ABs
 integer::ind_act ! current element index
 integer::max_environ  ! maximum number of atoms in environment
 integer::max_around  ! maximum actual number of atoms around
@@ -47,13 +49,17 @@ real(kind=8)::grad_step  ! distance between two gradient bins
 real(kind=8)::normfac   ! normalizaion factor for RDFs and ADFs
 real(kind=8)::rdum   ! dummy real number
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
-integer::ind_list(50)   ! list of different element indices
+integer::ind_list_loc(50,20)   ! local list of different element indices
+integer::ind_list(50)    ! global list of different element indices
 character(len=2),allocatable::el_list(:)  ! current list of elements
+character(len=2)::el_list_loc(50,20)  ! local list of elements
 character(len=2)::el_list_glob(50)  ! global list of elements
 character(len=2)::el_act   ! the current element symbol for printing
 character(len=120)::arg,adum ! command line argument
 character(len=20)::bas_scale   ! linear or sqare root scaling of basis classes
+character(len=50)::mlab_list(20)  ! list of ML_AB files to be read in
 real(kind=8)::at_mass_glob(50)  ! Global list with atomic masses
+real(kind=8)::at_mass(50,20)  ! local list with atomic masses
 real(kind=8)::train_div   ! desired trainset diversity (0: none, 1: full)
 real(kind=8)::grad_frac   ! desired fraction of basis functions for large gradnorm
 real(kind=8),allocatable::energies(:)  ! the energies 
@@ -145,6 +151,37 @@ write(*,*) "    with many atoms, whereas the root scaling will favor those"
 write(*,*) "    with lower number of atoms."
 write(*,*) "Usage: mlff_select [list of command line arguments]"
 write(*,*)
+
+!
+!     Read in names of ML_AB files that shall be processed
+!
+mlab_num=0
+mlab_list="xxx"
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:7))  .eq. "-ml_ab=") then
+      read(arg(8:),*,iostat=readstat) mlab_list
+      if (readstat .ne. 0) then
+    !     write(*,*) "The format of the -ml_ab=[file1],[file2],... command seems to be corrupted!"
+    !     write(*,*)
+    !     stop
+      end if
+   end if
+end do
+mlab_num=0
+do i=1,20
+   if (mlab_list(i) .eq. "xxx") exit
+   mlab_num=mlab_num+1
+end do
+
+write(*,*) mlab_num
+write(*,*) mlab_list
+if (mlab_num .lt. 1) then
+   write(*,*) "Please give at least one ML_AB filename that can be read in!"
+   write(*,*) "The format is -ml_ab=[file1],[file2], ... (up to 20 files possible)"
+   write(*,*)
+   stop
+end if
 
 
 !
@@ -283,9 +320,10 @@ pi=4d0*atan(1.0d0)
 !
 cutoff=5.d0
 !
-!     Default values for global elements array
+!     Default values for local and global elements array
 !
 el_list_glob="XX"
+el_list_loc="XX"
 !
 !     Default values for global core charge array
 !
@@ -315,209 +353,238 @@ alpha_r=20.0
 !     Exponent for ADF Gaussian
 !
 alpha_a=0.5d0
+
+! ####################################################
+!     Loop over all ML_AB files given in the list and read in their content
+!
+!     PART A: HEADERS (for global array allocation)
+!
+natoms_max=0
+do l=1,mlab_num
 !
 !     Open the ML_AB file and check if it's there
 !
-open(unit=56,file="ML_AB",status="old",iostat=readstat)
-if (readstat .ne. 0) then
-   write(*,*) "The file ML_AB could not been found!"
-   stop
-end if
-write(*,*) "Read in the ML_AB file..."
+   open(unit=56,file=mlab_list(l),status="old",iostat=readstat)
+   if (readstat .ne. 0) then
+      write(*,*) "The file ",trim(mlab_list(l)), " could not been found!"
+      stop
+   end if
+   write(*,*) "Read in the file ",trim(mlab_list(l))," ..."
 !
 !     Read in the ML_AB file
 !
 !     First, read in the header and determine number of atoms and 
 !      configurations
-read(56,*,iostat=readstat)
-if (readstat .ne. 0) then
-   write(*,*) "The file ML_AB seems to be empty!"
-   stop
-end if
-read(56,*)
-read(56,*)
-read(56,*)
-read(56,*) conf_num
-read(56,*)
-read(56,*)
-read(56,*)
-read(56,*) nelems_glob
-read(56,*)
-read(56,*)
-read(56,*)
+   read(56,*,iostat=readstat)
+   if (readstat .ne. 0) then
+      write(*,*) "The file ",trim(mlab_list(l))," seems to be empty!"
+      stop
+   end if
+   read(56,*)
+   read(56,*)
+   read(56,*)
+   read(56,*) ind_act
+   conf_num=conf_num+ind_act
+   read(56,*)
+   read(56,*)
+   read(56,*)
+   read(56,*) nelems_local
+   read(56,*)
+   read(56,*)
+   read(56,*)
 !
 !     All elementwise properties are printed with three values per line!
 !
-do i=1,int(nelems_glob/3) 
-   read(56,*,iostat=readstat) el_list_glob((i-1)*3+1:i*3)
-end do
-if (int(nelems_glob/3)*3 .lt. nelems_glob) then
-   if ((nelems_glob-int(nelems_glob/3)*3) .eq. 3) then
-      read(56,*,iostat=readstat) el_list_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+3)
-   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 2) then     
-      read(56,*,iostat=readstat) el_list_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+2)
-   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 1) then
-      read(56,*,iostat=readstat) el_list_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+1)     
-   end if
-end if 
-
+   do i=1,int(nelems_local/3) 
+      read(56,*,iostat=readstat) el_list_loc((i-1)*3+1:i*3,l)
+   end do
+   if (int(nelems_local/3)*3 .lt. nelems_local) then
+      if ((nelems_local-int(nelems_local/3)*3) .eq. 3) then
+         read(56,*,iostat=readstat) el_list_loc(int(nelems_local/3)*3+1:int(nelems_local/3)*3+3,l)
+      else if ((nelems_local-int(nelems_local/3)*3) .eq. 2) then     
+         read(56,*,iostat=readstat) el_list_loc(int(nelems_local/3)*3+1:int(nelems_local/3)*3+2,l)
+      else if ((nelems_local-int(nelems_local/3)*3) .eq. 1) then
+         read(56,*,iostat=readstat) el_list_loc(int(nelems_local/3)*3+1:int(nelems_local/3)*3+1,l)     
+      end if
+   end if 
+  
 !
 !     Determine different element indices
 !
-outer: do i=1,50
-   if (el_list_glob(i) .eq. "XX") exit
-   call elem(el_list_glob(i),ind_act)
-   inner: do j=1,nelems_all
-      if (ind_act .eq. ind_list(j)) cycle outer
-   end do inner 
-   ind_list(i) = ind_act
-   nelems_all=nelems_all+1
-end do outer
+   outer: do i=1,50
+      if (el_list_loc(i,l) .eq. "XX") exit
+      call elem(el_list_loc(i,l),ind_act)
+      inner: do j=1,nelems_local
+         if (ind_act .eq. ind_list_loc(j,l)) cycle outer
+      end do inner 
+      ind_list_loc(i,l) = ind_act
+  !    nelems_local=nelems_local+1
+   end do outer
 
-read(56,*)
-read(56,*)
-read(56,*)
-read(56,*) natoms_max
-read(56,*)
-read(56,*)
-read(56,*)
-read(56,*) nat_type_max
-write(*,*) "nat_typ",nat_type_max,natoms_max
-read(56,*)
-read(56,*)
-read(56,*)
-read(56,*)
-do i=1,int(nelems_glob/3)
    read(56,*)
-end do
-read(56,*) 
-read(56,*)
-read(56,*)
-at_mass_glob=0
-do i=1,int(nelems_glob/3)
-   read(56,*) at_mass_glob((i-1)*3+1:i*3)
-end do
-if (int(nelems_glob/3)*3 .lt. nelems_glob) then
-   if ((nelems_glob-int(nelems_glob/3)*3) .eq. 3) then
-      read(56,*,iostat=readstat) at_mass_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+3)
-   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 2) then
-      read(56,*,iostat=readstat) at_mass_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+2)
-   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 1) then
-      read(56,*,iostat=readstat) at_mass_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+1)
+   read(56,*)
+   read(56,*)
+!
+!     Increment the global maximum number of atoms in the system, if needed
+!
+   read(56,*) ind_act
+   if (ind_act .gt. natoms_max) then
+      natoms_max=ind_act
    end if
-end if
+   read(56,*)
+   read(56,*)
+   read(56,*)
+   read(56,*) nat_type_max
+   write(*,*) "nat_typ",nat_type_max,natoms_max
+   read(56,*)
+   read(56,*)
+   read(56,*)
+   read(56,*)
+   do i=1,int(nelems_local/3)
+      read(56,*)
+   end do
+   read(56,*) 
+   read(56,*)
+   read(56,*)
+   at_mass(:,l)=0.d0 
+   do i=1,int(nelems_local/3)
+      read(56,*) at_mass((i-1)*3+1:i*3,l)
+   end do
+   if (int(nelems_local/3)*3 .lt. nelems_local) then
+      if ((nelems_local-int(nelems_local/3)*3) .eq. 3) then
+         read(56,*,iostat=readstat) at_mass(int(nelems_local/3)*3+1:int(nelems_local/3)*3+3,l)
+      else if ((nelems_local-int(nelems_local/3)*3) .eq. 2) then
+         read(56,*,iostat=readstat) at_mass(int(nelems_local/3)*3+1:int(nelems_local/3)*3+2,l)
+      else if ((nelems_local-int(nelems_local/3)*3) .eq. 1) then
+         read(56,*,iostat=readstat) at_mass(int(nelems_local/3)*3+1:int(nelems_local/3)*3+1,l)
+      end if
+   end if
+   close(56)
+end do
+
+stop "HGpgu"
+
+do l=1,mlab_num
+
+
 !
 !     Allocate global arrays 
 !
 !     The number of atoms in all reference structures
-allocate(natoms(conf_num)) 
+   allocate(natoms(conf_num)) 
 !     The geometries (cartesian coordinates)
-allocate(xyz(3,natoms_max,conf_num))
+   allocate(xyz(3,natoms_max,conf_num))
 !     The geometries (direct coordinates
-allocate(xyz_dir(3,natoms_max,conf_num))
+   allocate(xyz_dir(3,natoms_max,conf_num))
 !     The unit cell shapes
-allocate(cells(3,3,conf_num))
+   allocate(cells(3,3,conf_num))
 !     The element indices (core charges), more effective then names
-allocate(inds(natoms_max,conf_num))
+   allocate(inds(natoms_max,conf_num))
 !     The reference energies
-allocate(energies(conf_num))
+   allocate(energies(conf_num))
 !     The reference gradients
-allocate(grads(3,natoms_max,conf_num))
+   allocate(grads(3,natoms_max,conf_num))
 !     
-act_conf=0
-do 
-   read(56,'(a)',iostat=readstat) a130
-   if (readstat .ne. 0) then
-      exit
-   end if
+   act_conf=0
+   do 
+      read(56,'(a)',iostat=readstat) a130
+      if (readstat .ne. 0) then
+         exit
+      end if
 !
 !     If a new configuration has been found, read it in
 !
-   if (index(a130,"Configuration") .ne. 0) then
-      act_conf=act_conf+1
-      do i=1,7
-         read(56,*)
-      end do 
+      if (index(a130,"Configuration") .ne. 0) then
+         act_conf=act_conf+1
+         do i=1,7
+            read(56,*)
+         end do 
 !
 !     Read the list and numbers of elements to fulle the inds array
 !
-      read(56,*) nelems
-      if (allocated(el_list)) deallocate(el_list)
-      if (allocated(el_nums)) deallocate(el_nums)
-      allocate(el_list(nelems))
-      allocate(el_nums(nelems))
-      do i=1,3
-         read(56,*)
-      end do
+         read(56,*) nelems
+         if (allocated(el_list)) deallocate(el_list)
+         if (allocated(el_nums)) deallocate(el_nums)
+         allocate(el_list(nelems))
+         allocate(el_nums(nelems))
+         do i=1,3
+            read(56,*)
+         end do
 !
 !     The current number of atoms
 !
-      read(56,*) natoms(act_conf)
-      read(56,*)
-      read(56,*)
-      read(56,*)
-      do i=1,nelems
-         read(56,*) el_list(i),el_nums(i) 
-      end do
+         read(56,*) natoms(act_conf)
+         read(56,*)
+         read(56,*)
+         read(56,*)
+         do i=1,nelems
+            read(56,*) el_list(i),el_nums(i) 
+         end do
 !
 !     Fill element index array
 !
-      inc=0
-      do i=1,nelems
-         do j=1,el_nums(i)
-            inc=inc+1
-            call elem(el_list(i),ind_act)
-            inds(inc,act_conf)=ind_act
+         inc=0
+         do i=1,nelems
+            do j=1,el_nums(i)
+               inc=inc+1
+               call elem(el_list(i),ind_act)
+               inds(inc,act_conf)=ind_act
+            end do
+         end do      
+         do i=1,7
+            read(56,*) 
          end do
-      end do      
-      do i=1,7
-         read(56,*) 
-      end do
 !
 !     Read in the current unit cell vectors
 !
-      do i=1,3
-         read(56,*) cells(:,i,act_conf)
-      end do
-      read(56,*)
-      read(56,*)
-      read(56,*)
+         do i=1,3
+            read(56,*) cells(:,i,act_conf)
+         end do
+         read(56,*)
+         read(56,*)
+         read(56,*)
 !
 !     Read in the current geometry
 !
-      do i=1,natoms(act_conf)
-         read(56,*) xyz(:,i,act_conf)
-      end do
+         do i=1,natoms(act_conf)
+            read(56,*) xyz(:,i,act_conf)
+         end do
 !
 !     Invert the unit cell matrix and calculate the geometry 
 !        in direct coordinates
 !
-      call matinv3(cells(:,:,act_conf),cell_inv)
-      do i=1,natoms(act_conf)
-         xyz_dir(:,i,act_conf)=xyz(1,i,act_conf)*cell_inv(1,:)+ &
-              & xyz(2,i,act_conf)*cell_inv(2,:)+xyz(3,i,act_conf)*cell_inv(3,:)
-      end do 
-      read(56,*)
-      read(56,*)
-      read(56,*)
+         call matinv3(cells(:,:,act_conf),cell_inv)
+         do i=1,natoms(act_conf)
+            xyz_dir(:,i,act_conf)=xyz(1,i,act_conf)*cell_inv(1,:)+ &
+                 & xyz(2,i,act_conf)*cell_inv(2,:)+xyz(3,i,act_conf)*cell_inv(3,:)
+         end do 
+         read(56,*)
+         read(56,*)
+         read(56,*)
 !
 !     Read in the current energy
 !
-      read(56,*) energies(act_conf)
-      read(56,*)
-      read(56,*)
-      read(56,*)
+         read(56,*) energies(act_conf)
+         read(56,*)
+         read(56,*)
+         read(56,*)
 !
 !     Read in the current gradient
 !
-      do i=1,natoms(act_conf)
-         read(56,*) grads(:,i,act_conf)
-      end do
+         do i=1,natoms(act_conf)
+            read(56,*) grads(:,i,act_conf)
+         end do
 
-   end if
+      end if
 
+   end do
+   close(56)
 end do
-close(56)
+
+!
+!     Define local element names and masses array
+!
+
 write(*,*) " ... done!"
 !
 !     Setup classifier arrays for the atoms
