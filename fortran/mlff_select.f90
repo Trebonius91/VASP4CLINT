@@ -12,6 +12,8 @@ program mlff_select
 implicit none
 integer::i,j,k,l,m   ! loop indices
 integer::inc,inc2,inc3,inc4  ! incremented index
+integer::inc_atom  ! element-global atom position increment (basis set)
+integer::inc_act   ! the current increment
 integer::inc_remain  ! remainder index for basis functions
 integer,allocatable::incs(:)  ! moredimensional increment
 integer::readstat
@@ -23,6 +25,7 @@ integer::grad_pre    ! number of basis functions for large gradnorms
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
 integer::natoms_max  ! maximum number of atoms per configuration
+integer::nat_type_max  ! maximum number of atoms per element 
 integer::natoms_sum  ! sum of all atoms within all configurations
 integer::nelems  ! current number of elements
 integer::nelems_all  ! total number of different elements
@@ -33,6 +36,7 @@ integer::max_around  ! maximum actual number of atoms around
 integer::ngrid  ! number of grid points for RDF calculation
 integer::spots_avail  ! number of basis functions for final k-means
 integer::remain_class  ! index of the remainder class for basis functions
+integer::nconfs_out   ! number of configurations to be written out
 integer,allocatable::natoms(:)  ! atom numbers of configurations
 real(kind=8),allocatable::xyz(:,:,:) ! the geometries
 real(kind=8),allocatable::xyz_dir(:,:,:) ! the geometries (direct coords)
@@ -45,10 +49,11 @@ real(kind=8)::rdum   ! dummy real number
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
 integer::ind_list(50)   ! list of different element indices
 character(len=2),allocatable::el_list(:)  ! current list of elements
-character(len=2)::el_list_glob(50)  ! global list of elements 
+character(len=2)::el_list_glob(50)  ! global list of elements
 character(len=2)::el_act   ! the current element symbol for printing
-character(len=120)::arg  ! command line argument
+character(len=120)::arg,adum ! command line argument
 character(len=20)::bas_scale   ! linear or sqare root scaling of basis classes
+real(kind=8)::at_mass_glob(50)  ! Global list with atomic masses
 real(kind=8)::train_div   ! desired trainset diversity (0: none, 1: full)
 real(kind=8)::grad_frac   ! desired fraction of basis functions for large gradnorm
 real(kind=8),allocatable::energies(:)  ! the energies 
@@ -89,6 +94,9 @@ integer,allocatable::basis_classes(:,:)  ! list of atoms in each basis class
 integer,allocatable::k_number(:)   ! list of k-means spots for basis classes
 integer,allocatable::smallest(:)  ! atom list with smallest mutual overlaps
 integer,allocatable::hierarchy(:,:)  ! the time-dependent cluster indices
+integer,allocatable::conf_final(:)  ! the final list of configurations
+integer,allocatable::trans_conf(:)  ! translation from old to new configuraiton number
+integer,allocatable::confbas_final(:,:)  ! the final list of confs. for each basis func
 integer::mat_coord(2)  ! the current matrix indices
 logical::eval_stat(10)  ! the progress for evaluation loops
 logical,allocatable::atom_used(:)  ! boolean mask for blocking of treated atoms
@@ -162,6 +170,8 @@ if (nbasis .lt. 1) then
    write(*,*)
    stop
 end if
+
+
 !
 !     The fraction of basis functions based on the largest gradient norms
 !
@@ -335,7 +345,22 @@ read(56,*) nelems_glob
 read(56,*)
 read(56,*)
 read(56,*)
-read(56,*,iostat=readstat) el_list_glob
+!
+!     All elementwise properties are printed with three values per line!
+!
+do i=1,int(nelems_glob/3) 
+   read(56,*,iostat=readstat) el_list_glob((i-1)*3+1:i*3)
+end do
+if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+   if ((nelems_glob-int(nelems_glob/3)*3) .eq. 3) then
+      read(56,*,iostat=readstat) el_list_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+3)
+   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 2) then     
+      read(56,*,iostat=readstat) el_list_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+2)
+   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 1) then
+      read(56,*,iostat=readstat) el_list_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+1)     
+   end if
+end if 
+
 !
 !     Determine different element indices
 !
@@ -353,6 +378,34 @@ read(56,*)
 read(56,*)
 read(56,*)
 read(56,*) natoms_max
+read(56,*)
+read(56,*)
+read(56,*)
+read(56,*) nat_type_max
+write(*,*) "nat_typ",nat_type_max,natoms_max
+read(56,*)
+read(56,*)
+read(56,*)
+read(56,*)
+do i=1,int(nelems_glob/3)
+   read(56,*)
+end do
+read(56,*) 
+read(56,*)
+read(56,*)
+at_mass_glob=0
+do i=1,int(nelems_glob/3)
+   read(56,*) at_mass_glob((i-1)*3+1:i*3)
+end do
+if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+   if ((nelems_glob-int(nelems_glob/3)*3) .eq. 3) then
+      read(56,*,iostat=readstat) at_mass_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+3)
+   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 2) then
+      read(56,*,iostat=readstat) at_mass_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+2)
+   else if ((nelems_glob-int(nelems_glob/3)*3) .eq. 1) then
+      read(56,*,iostat=readstat) at_mass_glob(int(nelems_glob/3)*3+1:int(nelems_glob/3)*3+1)
+   end if
+end if
 !
 !     Allocate global arrays 
 !
@@ -539,7 +592,7 @@ do i=1,conf_num
 
    do j=1,natoms(i)
       inc=inc+1
-      confnum_all(inc)=conf_num
+      confnum_all(inc)=i
       nat_all(inc)=j
       ind_all(inc)=inds(j,i)
 !
@@ -654,25 +707,6 @@ end do
 !     All atoms are still available
 !
 atom_used=.true.
-!
-!     Write local environments to trajectory file
-!
-max_around=maxval(sum(num_around,dim=1)) 
-open(unit=56,file="environments.xyz",status="replace")
-do i=1,1000
-   write(56,*) max_around
-   write(56,'(a,i8)') " environment No. ",i
-   do j=1,max_around
-      call atomname(ind_env(j,i),el_act) 
-      write(56,*) el_act,environ(:,j,i)
-   end do  
-
-end do
-close(56)
-
-write(*,*)
-write(*,*) "File 'environments.xyz' with local environments written."
-write(*,*)
 
 !
 !     Test write out for radial distribution functions
@@ -781,23 +815,23 @@ end do
 !      into different neighbor bins (each bin one, until full or all atoms
 !      allocated, line per line)
 !
-
 neigh_bas=0
 do_elems: do i=1,nelems
-   inc=0
+   inc=grad_pre
    do_column:  do
       do_environ: do j=1,max_environ
-         inc=inc+1
-         if (inc .gt. neigh_min_bas) exit do_column
+         if (inc .gt. neigh_min_bas+grad_pre) exit do_column
          if (neigh_bas(i,j) .lt. neigh_global(i,j)) then
             neigh_bas(i,j)=neigh_bas(i,j)+1
             do_atoms: do k=1,natoms_sum
 !
 !      Allocate chosen atom to final basis set
+!      Check if it has the correct element!
 !
-               if (atom_used(k)) then
+               if (atom_used(k) .and. (ind_all(k) .eq. ind_list(i))) then
                   if (neighnum_global(k) .eq. j) then
                      atom_used(k) = .false.
+                     inc=inc+1
                      final_choice(inc,i)=k
                      exit do_atoms
                   end if
@@ -832,7 +866,7 @@ do i=1,nelems
 !
 !     Number of available basis functions:
 !
-   write(*,*) "available:",grad_pre,neigh_min_bas
+
    inc=0
    inc3=0
    do j=1,max_environ
@@ -945,8 +979,13 @@ do i=1,nelems
 !
    spots_avail=nbasis-grad_pre-neigh_min_bas
 !
+!     The first index to add an atom to the global basis function list
+!
+   inc_atom=nbasis-spots_avail+1
+!
 !     Array with number of spots per neighbor subclass
 !
+   if (allocated(k_number)) deallocate(k_number)
    allocate(k_number(size(basis_sizes)))
 !
    do j=1,size(basis_sizes)
@@ -981,23 +1020,27 @@ do i=1,nelems
 !
    if (sum(k_number(1:size(basis_sizes))) .gt. spots_avail) then
       inc_remain=sum(k_number(1:size(basis_sizes)))-spots_avail
-      do j=1,size(basis_sizes)
-         if (k_number(j) .gt. 1) then
-            k_number(j) = k_number(j)-1
-            inc_remain=inc_remain-1
-            if (inc_remain .lt. 1) exit
-         end if
-      end do
+      decrem: do 
+         do j=1,size(basis_sizes)
+            if (k_number(j) .gt. 1) then
+               k_number(j) = k_number(j)-1
+               inc_remain=inc_remain-1
+               if (inc_remain .lt. 1) exit decrem
+            end if
+         end do
+      end do decrem
    end if
    if (sum(k_number(1:size(basis_sizes))) .lt. spots_avail) then
       inc_remain=spots_avail-sum(k_number(1:size(basis_sizes)))
-      do j=1,size(basis_sizes)
-         if (k_number(j) .ge. 1) then
-            k_number(j) = k_number(j)+1
-            inc_remain=inc_remain+1
-            if (inc_remain .gt. -1) exit
-         end if
-      end do
+      increm: do
+         do j=1,size(basis_sizes)
+            if (k_number(j) .ge. 1) then
+               k_number(j) = k_number(j)+1
+               inc_remain=inc_remain+1
+               if (inc_remain .gt. -1) exit increm
+            end if
+         end do
+      end do increm
    end if
 !
 !     Now perform the k-means clustering for each diversity-neighbor 
@@ -1010,7 +1053,6 @@ do i=1,nelems
       allocate(hierarchy(basis_sizes(j),basis_sizes(j)))
       mat_overlap=1.1d0
       if (k_number(j) .gt. 0) then
-         if (j .eq. 13) write(*,*) k_number(j)
          do k=1,basis_sizes(j)
             do l=1,k-1
 !
@@ -1035,7 +1077,6 @@ do i=1,nelems
          do l=1,basis_sizes(j)
             hierarchy(l,1)=l
          end do
-         write(*,*) hierarchy(:,1)
          inc2=basis_sizes(j)+1
          do k=2,basis_sizes(j)
             do l=1,basis_sizes(j)
@@ -1108,73 +1149,230 @@ do i=1,nelems
                end if
             end do
 
-            do l=1,basis_sizes(j)
-            write(199,'(12f10.6)') mat_overlap(l,:)
-            end do
-            write(199,*)
+         !   do l=1,basis_sizes(j)
+         !   write(199,'(12f10.6)') mat_overlap(l,:)
+         !   end do
+         !   write(199,*)
 
             inc2=inc2+1       
-            write(*,'(12i5,f10.6)') hierarchy(:,k),rdum
          end do
 !
-!     Diagonalize overlap matrix
+!     Finally, determine the atom indices used for the basis set by choosing them 
+!      from the intermediate clustering, where the number of clusters is equal to
+!      the number of needed basis functions, one function is then taken from
+!      each cluster
+!     The first atom always belongs to a new cluster and is thus always taken
+
+         final_choice(inc_atom,i)=basis_classes(1,j)
+         inc_atom=inc_atom+1 
+
+         inc_act=basis_sizes(j)-k_number(j)+1
+         if (k_number(j) .gt. basis_sizes(j)) then
+            write(*,*) "For one neighborhood class, the number of basis functions to "
+            write(*,*) " be allocated is larger than the total number of atoms in this"
+            write(*,'(a,i7,a,i7,a)') " spot! (current:",k_number(j),", allowed:",basis_sizes(j)," )"
+            write(*,*) "Please reduce the number of basis functions for ",el_list_glob(i),"!"
+            stop 
+         end if        
+         atom_list: do k=2,basis_sizes(j)
+            
 !
-!         if (allocated(A_mat)) deallocate(A_mat)
-!         if (allocated(W)) deallocate(W)
-!         if (allocated(WORK)) deallocate(WORK)
-!         JOBZ='V' !eigenvalues and eigenvectors(U)
-!         UPLO='U' !upper triangle of a
-!         Nn=basis_sizes(j)
-!         LDA=Nn
-!         INFO=0
-!         LWORK=Nn*Nn-1
-!         allocate(A_mat(Nn,Nn))
-!         allocate(W(Nn))
-!         allocate(WORK(LWORK))
-!         A_mat=mat_overlap
-!         call DSYEV(JOBZ,UPLO,Nn,A_mat,LDA,W,WORK,LWORK,INFO)
+!     The cluster must be different to that before but also should not appeared earlier at all!
 !
-!     Aanalyze eigenvalues and eigenvectors
-!
-!         do k=1,basis_sizes(j)
-!            write(*,*) "value",k,W(k)
-!            do l=1,basis_sizes(j)
-!               write(*,*) l,abs(A_mat(k,l))
-!            end do
-!         end do
-!         A_mat=abs(A_mat)
-!
-!     Calculate overlap sum of largest eigenvector components
-!
-!         if (allocated(smallest)) deallocate(smallest)
-!         allocate(smallest(k_number(k)))         
-!         do k=1,basis_sizes(j)
-!            do l=1,k_number(j)
-!               smallest(l)=maxloc(A_mat(:,k),dim=1) 
-!               A_mat(smallest(l),k)=0.0
-!            end do
-!            write(*,*) k,smallest
-!            rdum=0.d0
-!            do l=1,k_number(j)
-!               do m=1,k_number(j)
-!                  rdum=rdum+mat_overlap(smallest(l),smallest(m))
-!               end do
-!            end do
-!            write(*,*) "summ",rdum
-!
-!         end do
+            if (hierarchy(k-1,inc_act) .ne. hierarchy(k,inc_act)) then
+               do l=1,k-1
+                  if (hierarchy(l,inc_act) .eq. hierarchy(k,inc_act)) then 
+                     cycle atom_list
+                  end if                            
+               end do      
+               final_choice(inc_atom,i)=basis_classes(k,j)
+               inc_atom=inc_atom+1              
+            end if        
+         end do atom_list
+
       end if
-      if (j .eq. 13) stop "GHüuipg"
-      write(*,*) j,basis_sizes(j)
    end do
 
-
-   stop "Hiühi"
 end do
 
 
+!
+!     Finally, write out the newly generated ML_AB file!
+!
+!     Determine the number and the list of written out full configurations
+!
+allocate(conf_final(conf_num))
+allocate(trans_conf(conf_num))
+allocate(confbas_final(nbasis,nelems))
+nconfs_out=0
+trans_conf=0
+inc3=0
+conf_final=0
+do i=1,nelems
+   do_basis: do j=1,nbasis
+!      write(*,*) final_choice(j,i),i,j
+      inc2=confnum_all(final_choice(j,i))
+      do k=1,inc3
+         if (inc2 .eq. conf_final(k)) then
+            cycle do_basis
+         end if   
+      end do
+      inc3=inc3+1
+      conf_final(inc3)=inc2
+   end do do_basis
+end do
+nconfs_out=inc3
+!
+!    Initialize array for translation from old to knew configuration numbers
+!    (important if not all old configurations will be part of the new ML_AB)
+!
+do i=1,conf_num
+   do j=1,nconfs_out
+      if (conf_final(j) .eq. i) then
+         trans_conf(i)=j
+      end if     
+   end do
+end do
 
 
+!
+!     Write local environments of all chosen basis atoms to a trajectory file
+!
+max_around=maxval(sum(num_around,dim=1))
+open(unit=56,file="environments.xyz",status="replace")
+do i=1,nelems
+   do j=1,nbasis
+      write(56,*) max_around
+      write(56,'(a,a,a,i8,a)') " ",el_list_glob(i)," basis atom ",j," (environment)"
+      do k=1,max_around
+         call atomname(ind_env(k,final_choice(j,i)),el_act)
+         write(56,*) el_act,environ(:,k,final_choice(j,i))
+      end do
+   end do
+end do
+close(56)
+
+write(*,*)
+write(*,*) "File 'environments.xyz' with local environments written."
+write(*,*)
+
+
+
+!
+!    First write the header of the new ML_AB file
+!
+open(unit=56,file="ML_AB_sel",status="replace")
+write(56,'(a)') " 1.0 Version (written by mlff_select of VASP4CLINT)"
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     The number of configurations"
+write(56,'(a)') "--------------------------------------------------"
+write(56,'(i10)') nconfs_out
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     The maximum number of atom type"
+write(56,'(a)') "--------------------------------------------------"
+write(56,'(i8)') nelems
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     The atom types in the data file"
+write(56,'(a)') "--------------------------------------------------"
+do i=1,int(nelems_glob/3)
+   write(56,'(a)',advance="no") "    "
+   do j=1,3
+      write(56,'(a,a)',advance="no") " ",el_list_glob((i-1)*3+j)
+   end do   
+   write(56,*) 
+end do
+if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+   write(56,'(a)',advance="no") "    "     
+   do j=int(nelems_glob/3)*3,nelems_glob-1
+      write(*,*) j,1+j   
+      write(56,'(a,a)',advance="no") " ",el_list_glob(1+j)
+   end do
+   write(56,*)
+end if   
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     The maximum number of atoms per system "
+write(56,'(a)') "--------------------------------------------------"
+write(56,'(i15)') natoms_max
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     The maximum number of atoms per atom type"
+write(56,'(a)') "--------------------------------------------------"
+write(56,'(i15)') nat_type_max
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     Reference atomic energy (eV)"
+write(56,'(a)') "--------------------------------------------------"
+do i=1,int(nelems_glob/3)
+   write(56,'(3e14.3)') 0.d0, 0.d0, 0.d0
+end do
+if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+   do j=int(nelems_glob/3)*3,nelems_glob   
+      write(56,'(e18.10)',advance="no") 0.d0
+   end do
+   write(56,*)
+end if
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     Atomic mass"
+write(56,'(a)') "--------------------------------------------------"
+do i=1,int(nelems_glob/3)
+   do j=1,3
+      write(56,'(f20.12)',advance="no") at_mass_glob((i-1)*3+j)
+   end do   
+   write(56,*) 
+end do
+if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+   do j=int(nelems_glob/3)*3,nelems_glob-1 
+      write(56,'(f20.12)',advance="no") at_mass_glob(1+j)
+   end do
+   write(56,*)
+end if
+write(56,'(a)') "**************************************************"
+write(56,'(a)') "     The numbers of basis sets per atom type"
+write(56,'(a)') "--------------------------------------------------"
+do i=1,int(nelems_glob/3)
+   write(56,'(a)',advance="no") "    "
+   do j=1,3
+      write(56,'(i7)',advance="no") nbasis
+   end do   
+   write(56,*) 
+end do
+if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+   write(56,'(a)',advance="no") "    "     
+   do j=int(nelems_glob/3)*3,nelems_glob-1  
+      write(56,'(i7)',advance="no") nbasis
+   end do
+   write(56,*)
+end if
+
+!
+!    Now write the basis set information for each element, separately
+!
+
+do i=1,nelems
+   write(56,'(a)') "**************************************************"
+   write(56,'(a,a)') "     Basis set for ",el_list_glob(i)
+   write(56,'(a)') "--------------------------------------------------"
+   do j=1,nbasis
+      write(56,'(a,3i7)') "    ",j,trans_conf(confnum_all(final_choice(j,i))), &
+                       & nat_all(final_choice(j,i))
+   end do
+end do
+
+
+!
+!     Write out the information for all remaining configurations in the set
+!
+
+do i=1,nconfs_out
+   write(56,'(a)') "**************************************************"
+   write(56,'(a,i7)') "     Configuration num. ",i
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     System name"
+   write(56,'(a)') "--------------------------------------------------"
+
+
+
+end do
+
+close(56)
 
 end program mlff_select
 
