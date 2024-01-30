@@ -18,11 +18,12 @@ integer::inc_remain  ! remainder index for basis functions
 integer::mlab_num   ! number of ML_AB files to be read in
 integer,allocatable::incs(:)  ! moredimensional increment
 integer::readstat
-integer::nbasis  ! desired number of local refs. in new ML_AB
-integer::neigh_min_bas  ! minimum number of confs. per neighbor bin
-integer::nbas_grad  ! number of basis functions for max.  gradient comps
+integer::nbasis(50)  ! desired number of local refs. in new ML_AB
+integer::nbasis_tmp(50)  ! for resorting of nbasis array, if needed
+integer::neigh_min_bas(50)  ! minimum number of confs. per neighbor bin
+integer::nbas_grad(50)  ! number of basis functions for max.  gradient comps
 integer::neigh_classes ! number of neighborhood subdivision classes
-integer::grad_pre    ! number of basis functions for large gradnorms
+integer::grad_pre(50)    ! number of basis functions for large gradnorms
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
 integer::natoms_max  ! maximum number of atoms per configuration
@@ -30,7 +31,7 @@ integer::nat_type_max  ! maximum number of atoms per element
 integer::natoms_sum  ! sum of all atoms within all configurations
 integer::nelems  ! current number of elements
 integer::nelems_all  ! total number of different elements
-integer::nelems_local   ! local number of different elements 
+integer::nelems_local(20)   ! local number of different elements 
 integer::nelems_glob  ! number of different elements in all ML_ABs
 integer::ind_act ! current element index
 integer::max_environ  ! maximum number of atoms in environment
@@ -40,24 +41,30 @@ integer::spots_avail  ! number of basis functions for final k-means
 integer::remain_class  ! index of the remainder class for basis functions
 integer::nconfs_out   ! number of configurations to be written out
 integer,allocatable::natoms(:)  ! atom numbers of configurations
+integer,allocatable::nelems_confs(:)  ! number of elements in all configurations
 real(kind=8),allocatable::xyz(:,:,:) ! the geometries
 real(kind=8),allocatable::xyz_dir(:,:,:) ! the geometries (direct coords)
 real(kind=8),allocatable::cells(:,:,:) ! the unit cells
+real(kind=8),allocatable::ctifors(:)  ! the CTIFOR values for all configurations
+real(kind=8),allocatable::stress(:,:)  ! stress tensors for all configurations
 real(kind=8),allocatable::angles(:)  ! list of angles for current environment
 real(kind=8)::grad_min,grad_max  ! minimum and maximum gradient norm (global)
 real(kind=8)::grad_step  ! distance between two gradient bins
 real(kind=8)::normfac   ! normalizaion factor for RDFs and ADFs
+real(kind=8)::rdf_adf   ! relative weighting of RDF and ADFs in clustering
 real(kind=8)::rdum   ! dummy real number
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
 integer::ind_list_loc(50,20)   ! local list of different element indices
 integer::ind_list(50)    ! global list of different element indices
-character(len=2),allocatable::el_list(:)  ! current list of elements
+character(len=2),allocatable::el_list_confs(:,:)  ! List of elements in all confs.
 character(len=2)::el_list_loc(50,20)  ! local list of elements
 character(len=2)::el_list_glob(50)  ! global list of elements
+character(len=2)::el_list_bas(50)  ! list of elements for basis init.
 character(len=2)::el_act   ! the current element symbol for printing
-character(len=120)::arg,adum ! command line argument
+character(len=300)::arg,adum ! command line argument
 character(len=20)::bas_scale   ! linear or sqare root scaling of basis classes
 character(len=50)::mlab_list(20)  ! list of ML_AB files to be read in
+character(len=50)::basis_read(50)  ! read in for element-specific basis functions
 real(kind=8)::at_mass_glob(50)  ! Global list with atomic masses
 real(kind=8)::at_mass(50,20)  ! local list with atomic masses
 real(kind=8)::train_div   ! desired trainset diversity (0: none, 1: full)
@@ -81,8 +88,11 @@ real(kind=8)::alpha_r   ! exponent for RDF Gaussian functions
 real(kind=8)::alpha_a   ! exponent for ADF Gaussian functions
 real(kind=8)::x_act   ! current x-value for RDF buildup
 real(kind=8)::rdf_overlap  ! the current RDF overlap integral
+real(kind=8)::adf_overlap  ! the current ADF overlap integral
+real(kind=8)::rdf_weight  ! relative weight of RDF overlap 
+real(kind=8)::adf_weight  ! relative weight of ADF overlap
 real(kind=8)::pi  ! the Pi
-integer,allocatable::el_nums(:)  ! current numbers of elements
+integer,allocatable::el_nums_confs(:,:)  ! element numbers in all configurations
 integer,allocatable::confnum_all(:)  ! numbers of configurations 
 integer,allocatable::nat_all(:) ! number of atom in configurations
 integer,allocatable::ind_all(:)  ! element indices of all atoms
@@ -126,29 +136,41 @@ write(*,*) "The procedure is similar to the VASP command ML_MODE = select,"
 write(*,*) " but is faster (since purely based on geometrical comparisons)"
 write(*,*) " and has more options to be adjusted (global approach)"
 write(*,*) "The following settings must be given by command line arguments:"
+write(*,*) " -ml_ab=[file1],[file2],... : The file names of the ML_AB files "
+write(*,*) "    that shall be processed by the program. Between 1 and 20 "
+write(*,*) "    can be given in total."
 write(*,*) " -nbasis=[number] : the [number] is the desired number of local"
 write(*,*) "    reference configurations (basis functions) per element in the"
-write(*,*) "    newly written ML_AB file."
+write(*,*) "    newly written ML_AB file. If this is chosen, each element"
+write(*,*) "    will have the same number of local ref. confs."
+write(*,*) " -nbasis_el=[el1:number1],[el2:number2],... : (Optional) give the"
+write(*,*) "    number of basis functions per element explicitly. If this is "
+write(*,*) "    done, one number must be given for each element appearing "
+write(*,*) "    in any of the ML_AB files! example: nbasis_el=Ga:3000,Pt:1000"
 write(*,*) " -grad_frac=[value] : percentage of basis functions to be "
 write(*,*) "    allocated for the largest gradient components in the "
 write(*,*) "    references. The [value]*nbasis atoms with the largest "
-write(*,*) "    will be taken all."
+write(*,*) "    will be taken all. Default: 0.1"
 write(*,*) " -train_div=[value] : the training set diversity (maximum: 1.0,"
 write(*,*) "    minimum: 0.0). The larger the value, the higher percentage"
 write(*,*) "    will be chosen based on different number of neighbor atoms,"
 write(*,*) "    such that the tails of the neighbor distribution will be "
-write(*,*) "    will be weighted larger (larger diversity)"
+write(*,*) "    weighted larger (larger diversity). Default: 0.1"
+write(*,*) " -rdf2adf=[value] : Relative weighting of radial distribution "
+write(*,*) "    function (RDF) and angular distribution function (ADF) overlap"
+write(*,*) "    in constructing the clustering matrices. Example: -rdf2adf=2.0:"
+write(*,*) "    RDF will have 66% weight, ADF 33% (2 to 1). Default: 1.0"
 write(*,*) " -neigh_classes=[number] : Number of diversity-based neighborhood"
 write(*,*) "    classes (per number of atoms in the environment, the number"
 write(*,*) "    subdivisions, sorted by the diversity (respect to elements)"
-write(*,*) "    of the neighborhoods"
+write(*,*) "    of the neighborhoods. Default: 4"
 write(*,*) " -bas_scale=('linear' or 'root') : How the number of basis functions"
 write(*,*) "    allocated to a certain neighborhood class shall scale with"
 write(*,*) "    the number of atoms contained into it."
 write(*,*) "    possibe are: 'linear' (linear scaling) or 'root' (square root"
 write(*,*) "    scaling). The linear scaling will give more spots to classes "
 write(*,*) "    with many atoms, whereas the root scaling will favor those"
-write(*,*) "    with lower number of atoms."
+write(*,*) "    with lower number of atoms. Default: linear"
 write(*,*) "Usage: mlff_select [list of command line arguments]"
 write(*,*)
 
@@ -174,8 +196,6 @@ do i=1,20
    mlab_num=mlab_num+1
 end do
 
-write(*,*) mlab_num
-write(*,*) mlab_list
 if (mlab_num .lt. 1) then
    write(*,*) "Please give at least one ML_AB filename that can be read in!"
    write(*,*) "The format is -ml_ab=[file1],[file2], ... (up to 20 files possible)"
@@ -188,26 +208,54 @@ end if
 !     Read in command line arguments
 !
 !     The desired number of reference environments (basis functions)
+!     Option 1: global number for all elements in the ML_AB files
 !
 nbasis=0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:8))  .eq. "-nbasis=") then
-      read(arg(9:),*,iostat=readstat) nbasis
+      read(arg(9:),*,iostat=readstat) inc
       if (readstat .ne. 0) then
          write(*,*) "The format of the -nbasis=[number] command seems to be corrupted!"
          write(*,*)
          stop
       end if
+      nbasis=inc
    end if
 end do
-if (nbasis .lt. 1) then
+!
+!     The desired number of reference environments (basis functions)
+!     Option 2: one individual number for each element in the ML_AB file
+!
+basis_read="xxxx"
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:11))  .eq. "-nbasis_el=") then
+      read(arg(12:),*,iostat=readstat) basis_read
+      if (readstat .ne. 0) then
+     !    write(*,*) "The format of the -nbasis=[number] command seems to be corrupted!"
+     !    write(*,*)
+     !    stop
+      end if
+   end if
+end do
+
+do i=1,50
+   if (basis_read(i) .eq. "xxxx") exit
+   do j=1,50
+      if (basis_read(i)(j:j) .eq. ":") then
+         el_list_bas(i)=basis_read(i)(1:j-1)
+         read(basis_read(i)(j+1:),*) nbasis(i)   
+      end if
+   end do
+end do
+
+if (sum(nbasis) .lt. 1) then
    write(*,*) "Please give the number of local reference configurations after selection"
    write(*,*) " with the keyword -nbasis=[number]! Recommended are 2000-6000"
    write(*,*)
    stop
 end if
-
 
 !
 !     The fraction of basis functions based on the largest gradient norms
@@ -253,6 +301,29 @@ if (train_div .lt. 0.0 .or. train_div .gt. 1.0) then
    write(*,*)
    stop
 end if
+!
+!     Relative weight of RDF and ADF overlaps for the construction of 
+!      the clustering matrices
+!
+rdf_adf=1.0d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:9))  .eq. "-rdf2adf=") then
+      read(arg(10:),*,iostat=readstat) rdf_adf
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -rdf2adf=[value] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (rdf_adf .lt. 0.0 ) then
+   write(*,*) "Please give a value between zero and infinity for the -rdf2adf command!"
+   write(*,*)
+   stop
+end if
+rdf_weight=rdf_adf/(rdf_adf+1.d0)
+adf_weight=1.d0/(rdf_adf+1.d0)
 
 !
 !     The number of neighborhood classes
@@ -305,12 +376,15 @@ end if
 !
 !     Number of basis functions allocated to minimum into different neighbor bins 
 !
-neigh_min_bas=int(nbasis*train_div)
-
-
-write(*,'(a,i7)') " Number of desired local reference configuraitons per element:",nbasis
-write(*,'(a,i7)') " Number of configurations allocated uniformly for neighbor-bins:",neigh_min_bas
-
+do i=1,nelems
+   neigh_min_bas(i)=int(nbasis(i)*train_div)
+end do
+do i=1,nelems
+   write(*,'(a,a,a,i7)') "  ",el_list_glob(i),": Number of desired local reference &
+                & configuraitons:",nbasis
+   write(*,'(a,a,a,i7)') "  ",el_list_glob(i),": Number of configurations allocated &
+                & uniformly for neighbor-bins:",neigh_min_bas
+end do
 !
 !     Define the Pi
 !
@@ -369,7 +443,7 @@ do l=1,mlab_num
       write(*,*) "The file ",trim(mlab_list(l)), " could not been found!"
       stop
    end if
-   write(*,*) "Read in the file ",trim(mlab_list(l))," ..."
+   write(*,*) "Read header of the file ",trim(mlab_list(l))," ..."
 !
 !     Read in the ML_AB file
 !
@@ -388,23 +462,23 @@ do l=1,mlab_num
    read(56,*)
    read(56,*)
    read(56,*)
-   read(56,*) nelems_local
+   read(56,*) nelems_local(l)
    read(56,*)
    read(56,*)
    read(56,*)
 !
 !     All elementwise properties are printed with three values per line!
 !
-   do i=1,int(nelems_local/3) 
+   do i=1,int(nelems_local(l)/3) 
       read(56,*,iostat=readstat) el_list_loc((i-1)*3+1:i*3,l)
    end do
-   if (int(nelems_local/3)*3 .lt. nelems_local) then
-      if ((nelems_local-int(nelems_local/3)*3) .eq. 3) then
-         read(56,*,iostat=readstat) el_list_loc(int(nelems_local/3)*3+1:int(nelems_local/3)*3+3,l)
-      else if ((nelems_local-int(nelems_local/3)*3) .eq. 2) then     
-         read(56,*,iostat=readstat) el_list_loc(int(nelems_local/3)*3+1:int(nelems_local/3)*3+2,l)
-      else if ((nelems_local-int(nelems_local/3)*3) .eq. 1) then
-         read(56,*,iostat=readstat) el_list_loc(int(nelems_local/3)*3+1:int(nelems_local/3)*3+1,l)     
+   if (int(nelems_local(l)/3)*3 .lt. nelems_local(l)) then
+      if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 3) then
+         read(56,*,iostat=readstat) el_list_loc(int(nelems_local(l)/3)*3+1:int(nelems_local(l)/3)*3+3,l)
+      else if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 2) then     
+         read(56,*,iostat=readstat) el_list_loc(int(nelems_local(l)/3)*3+1:int(nelems_local(l)/3)*3+2,l)
+      else if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 1) then
+         read(56,*,iostat=readstat) el_list_loc(int(nelems_local(l)/3)*3+1:int(nelems_local(l)/3)*3+1,l)     
       end if
    end if 
   
@@ -414,7 +488,7 @@ do l=1,mlab_num
    outer: do i=1,50
       if (el_list_loc(i,l) .eq. "XX") exit
       call elem(el_list_loc(i,l),ind_act)
-      inner: do j=1,nelems_local
+      inner: do j=1,nelems_local(l)
          if (ind_act .eq. ind_list_loc(j,l)) cycle outer
       end do inner 
       ind_list_loc(i,l) = ind_act
@@ -435,57 +509,131 @@ do l=1,mlab_num
    read(56,*)
    read(56,*)
    read(56,*) nat_type_max
-   write(*,*) "nat_typ",nat_type_max,natoms_max
    read(56,*)
    read(56,*)
    read(56,*)
    read(56,*)
-   do i=1,int(nelems_local/3)
+   do i=1,int(nelems_local(l)/3)
       read(56,*)
    end do
    read(56,*) 
    read(56,*)
    read(56,*)
    at_mass(:,l)=0.d0 
-   do i=1,int(nelems_local/3)
+   do i=1,int(nelems_local(l)/3)
       read(56,*) at_mass((i-1)*3+1:i*3,l)
    end do
-   if (int(nelems_local/3)*3 .lt. nelems_local) then
-      if ((nelems_local-int(nelems_local/3)*3) .eq. 3) then
-         read(56,*,iostat=readstat) at_mass(int(nelems_local/3)*3+1:int(nelems_local/3)*3+3,l)
-      else if ((nelems_local-int(nelems_local/3)*3) .eq. 2) then
-         read(56,*,iostat=readstat) at_mass(int(nelems_local/3)*3+1:int(nelems_local/3)*3+2,l)
-      else if ((nelems_local-int(nelems_local/3)*3) .eq. 1) then
-         read(56,*,iostat=readstat) at_mass(int(nelems_local/3)*3+1:int(nelems_local/3)*3+1,l)
+   if (int(nelems_local(l)/3)*3 .lt. nelems_local(l)) then
+      if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 3) then
+         read(56,*,iostat=readstat) at_mass(int(nelems_local(l)/3)*3+1:int(nelems_local(l)/3)*3+3,l)
+      else if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 2) then
+         read(56,*,iostat=readstat) at_mass(int(nelems_local(l)/3)*3+1:int(nelems_local(l)/3)*3+2,l)
+      else if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 1) then
+         read(56,*,iostat=readstat) at_mass(int(nelems_local(l)/3)*3+1:int(nelems_local(l)/3)*3+1,l)
       end if
    end if
    close(56)
 end do
 
-stop "HGpgu"
 
-do l=1,mlab_num
+!
+!     Define global element names and masses array
+!
+
+el_list_glob="XX"
+inc=0
+do i=1,mlab_num
+   do_nelems1: do j=1,nelems_local(i)
+      do k=1,inc-1
+         if (el_list_glob(k) .eq. el_list_loc(j,i)) then
+            cycle do_nelems1
+         end if
+      end do   
+      inc=inc+1
+      el_list_glob(inc)=el_list_loc(j,i)   
+   end do do_nelems1  
+end do
+nelems_glob=inc
+
+at_mass_glob=0.d0
+inc=0
+do i=1,mlab_num
+   do_nelems2: do j=1,nelems_local(i)
+      do k=1,inc-1
+         if (at_mass_glob(k) .eq. at_mass(j,i)) then
+            cycle do_nelems2
+         end if
+      end do
+      inc=inc+1
+      at_mass_glob(inc)=at_mass(j,i)
+   end do do_nelems2
+end do
+
+!
+!     Compare global element list with basis functions element list
+!     and resort the latter (or throw an error if something is missing)
+!
+do i=1,nelems_glob
+   do j=1,nelems_glob
+      if (el_list_glob(i) .eq. el_list_bas(j)) then
+         nbasis_tmp(j)=nbasis(i)
+         cycle
+      end if
+   end do
+end do
+nbasis=nbasis_tmp
+!
+!     Determine global different element indices
+!
+do i=1,nelems_glob
+   call elem(el_list_glob(i),ind_act)
+   ind_list(i) = ind_act
+end do 
 
 
 !
-!     Allocate global arrays 
+!    PART B: BODY (for filling of global arrays)
+!
+!    The global configuration increment index
+!
+act_conf=0
+!
+!     Allocate global arrays
 !
 !     The number of atoms in all reference structures
-   allocate(natoms(conf_num)) 
+allocate(natoms(conf_num))
+!     The number of elements in all reference structures
+allocate(nelems_confs(conf_num))
+!     The list of element symbols in all configurations
+allocate(el_list_confs(nelems_glob,conf_num))
+!     The list of atom numbers in all configurations
+allocate(el_nums_confs(nelems_glob,conf_num))
 !     The geometries (cartesian coordinates)
-   allocate(xyz(3,natoms_max,conf_num))
+allocate(xyz(3,natoms_max,conf_num))
 !     The geometries (direct coordinates
-   allocate(xyz_dir(3,natoms_max,conf_num))
+allocate(xyz_dir(3,natoms_max,conf_num))
 !     The unit cell shapes
-   allocate(cells(3,3,conf_num))
+allocate(cells(3,3,conf_num))
+!     The CTIFOR values
+allocate(ctifors(conf_num))
 !     The element indices (core charges), more effective then names
-   allocate(inds(natoms_max,conf_num))
+allocate(inds(natoms_max,conf_num))
 !     The reference energies
-   allocate(energies(conf_num))
+allocate(energies(conf_num))
 !     The reference gradients
-   allocate(grads(3,natoms_max,conf_num))
-!     
-   act_conf=0
+allocate(grads(3,natoms_max,conf_num))
+!     The reference stress tensors
+allocate(stress(6,conf_num))
+
+
+do l=1,mlab_num
+!
+!     Again open the ML_AB file 
+!
+   open(unit=56,file=mlab_list(l),status="old")
+
+   write(*,*) "Read body of the file ",trim(mlab_list(l))," ..."
+
    do 
       read(56,'(a)',iostat=readstat) a130
       if (readstat .ne. 0) then
@@ -502,11 +650,7 @@ do l=1,mlab_num
 !
 !     Read the list and numbers of elements to fulle the inds array
 !
-         read(56,*) nelems
-         if (allocated(el_list)) deallocate(el_list)
-         if (allocated(el_nums)) deallocate(el_nums)
-         allocate(el_list(nelems))
-         allocate(el_nums(nelems))
+         read(56,*) nelems_confs(act_conf)
          do i=1,3
             read(56,*)
          end do
@@ -517,23 +661,28 @@ do l=1,mlab_num
          read(56,*)
          read(56,*)
          read(56,*)
-         do i=1,nelems
-            read(56,*) el_list(i),el_nums(i) 
+         do i=1,nelems_confs(act_conf)
+            read(56,*) el_list_confs(i,act_conf),el_nums_confs(i,act_conf) 
          end do
 !
 !     Fill element index array
 !
          inc=0
-         do i=1,nelems
-            do j=1,el_nums(i)
+         do i=1,nelems_confs(act_conf)
+            do j=1,el_nums_confs(i,act_conf)
                inc=inc+1
-               call elem(el_list(i),ind_act)
+               call elem(el_list_confs(i,act_conf),ind_act)
                inds(inc,act_conf)=ind_act
             end do
          end do      
-         do i=1,7
-            read(56,*) 
-         end do
+         read(56,*)
+         read(56,*)
+         read(56,*)
+         read(56,*) ctifors(act_conf)
+         read(56,*)
+         read(56,*)
+         read(56,*)
+         
 !
 !     Read in the current unit cell vectors
 !
@@ -574,22 +723,34 @@ do l=1,mlab_num
          do i=1,natoms(act_conf)
             read(56,*) grads(:,i,act_conf)
          end do
-
+         read(56,*)
+         read(56,*)
+         read(56,*)
+         read(56,*)
+         read(56,*)
+!
+!     Read in the current stress tensors
+!
+         read(56,*) stress(1:3,act_conf)
+         read(56,*)
+         read(56,*)
+         read(56,*)
+         read(56,*) stress(4:6,act_conf)
       end if
-
    end do
    close(56)
 end do
 
-!
-!     Define local element names and masses array
-!
 
 write(*,*) " ... done!"
 !
 !     Setup classifier arrays for the atoms
 !     All atoms (no matter to which configuation they belong)
 !     are stored into one large array for each classifier!
+!
+!     From now on, the number of elements is always nelems_glob
+!
+nelems=nelems_glob
 !
 !     First, allocation of arrays:
 !
@@ -632,7 +793,7 @@ allocate(neighnum_global(natoms_sum))
 
 
 !     The FINAL choice of basis functions!
-allocate(final_choice(nbasis,nelems))
+allocate(final_choice(maxval(nbasis),nelems))
 
 
 
@@ -714,7 +875,7 @@ do i=1,conf_num
 !      environment cluster structure
 !
             if (dist_act .lt. cutoff) then
-               do l=1,nelems_all
+               do l=1,nelems
                   if (inds(k,i) .eq. ind_list(l)) then                          
                      num_around(l,inc)=num_around(l,inc)+1
                      inc2=inc2+1
@@ -770,6 +931,7 @@ do i=1,conf_num
 
    end do
 end do
+write(*,*) " ... finished!"
 !
 !     All atoms are still available
 !
@@ -793,6 +955,7 @@ do i=1,ngrid
 end do
 close(58)
 
+write(*,*) "Select reference confs. based on largest gradient norms..."
 !
 !    A: GRADIENT EXTREMA PRESELECTION:
 !    Determine histogram of gradient norms for all atoms, allocate them into
@@ -801,9 +964,12 @@ close(58)
 !
 !    The number of atoms preselected due to large gradient components
 !
-grad_pre=int(nbasis*grad_frac)
-allocate(atsel_grad(grad_pre,nelems))
-allocate(atsel_grad_val(grad_pre,nelems))
+grad_pre=0
+do i=1,nelems
+   grad_pre(i)=int(nbasis(i)*grad_frac)
+end do
+allocate(atsel_grad(maxval(grad_pre),nelems))
+allocate(atsel_grad_val(maxval(grad_pre),nelems))
 
 
 grad_min=minval(gradnorm_all)
@@ -837,7 +1003,6 @@ close(60)
 !  
 !    Stored in array: atsel_grad
 !
-
 incs=0
 atsel_grad=0
 atsel_grad_val=0.d0
@@ -845,7 +1010,7 @@ do
    inc=maxloc(gradnorm_all,dim=1)
    do i=1,nelems
       if (ind_all(inc) .eq. ind_list(i)) then
-         if (incs(i) .lt. grad_pre) then
+         if (incs(i) .lt. grad_pre(i)) then
             incs(i)=incs(i)+1
             atsel_grad(incs(i),i)=inc
             atom_used(inc)=.false. 
@@ -855,11 +1020,13 @@ do
          end if
       end if
    end do
-   if (sum(incs) .eq. nelems*grad_pre) then
+   if (sum(incs) .eq. sum(grad_pre)) then
       exit
    end if
    gradnorm_all(inc)=0.d0
 end do
+write(*,*) " ... done!"
+write(*,*) "Sort the configs. according to the number of their neighbors..."
 !    
 !    B: THE LOCAL NEIGHBORS: number and diversity, minimum number!
 !
@@ -877,6 +1044,8 @@ do i=1,natoms_sum
    end if      
 end do
 
+write(*,*) " ... done!"
+write(*,*) "Fill diversity-dependent minimum conf. numbers to neighbor bins..."
 !
 !    Fill diversity-dependent minimum number of allocated basis functions
 !      into different neighbor bins (each bin one, until full or all atoms
@@ -884,10 +1053,10 @@ end do
 !
 neigh_bas=0
 do_elems: do i=1,nelems
-   inc=grad_pre
+   inc=grad_pre(i)
    do_column:  do
       do_environ: do j=1,max_environ
-         if (inc .gt. neigh_min_bas+grad_pre) exit do_column
+         if (inc .gt. neigh_min_bas(i)+grad_pre(i)) exit do_column
          if (neigh_bas(i,j) .lt. neigh_global(i,j)) then
             neigh_bas(i,j)=neigh_bas(i,j)+1
             do_atoms: do k=1,natoms_sum
@@ -908,6 +1077,7 @@ do_elems: do i=1,nelems
       end do do_environ
    end do do_column
 end do do_elems
+write(*,*) " ... done!"
 
 !
 !    Write distribution of neighbor numbers to file
@@ -923,13 +1093,19 @@ do i=1,max_environ
 end do
 close(59)
 
+write(*,*) "File 'neighbor_nums.dat' with neighbor number histograms written..."
+write(*,*)
+write(*,*) "Select remaining basis functions via hierarchial cluster analysis"
+write(*,*) " of neighborhood-diversity specific atom classes, based on RDF "
+write(*,*) " and ADF overlap matrices."
 
 !    
 !     C: THE LOCAL NEIGHBORS: number and diversity, final allocation via 
-!      k-means cluster analysis!
+!      hierarchial cluster analysis!
 !      Outer loop over elements: separate calculation for each element!
 !
 do i=1,nelems
+   write(*,*) "Clustering all ",el_list_glob(i)," atoms ..."
 !
 !     Number of available basis functions:
 !
@@ -1044,11 +1220,11 @@ do i=1,nelems
 !
 !     Total number of available spots
 !
-   spots_avail=nbasis-grad_pre-neigh_min_bas
+   spots_avail=nbasis(i)-grad_pre(i)-neigh_min_bas(i)
 !
 !     The first index to add an atom to the global basis function list
 !
-   inc_atom=nbasis-spots_avail+1
+   inc_atom=nbasis(i)-spots_avail+1
 !
 !     Array with number of spots per neighbor subclass
 !
@@ -1133,9 +1309,20 @@ do i=1,nelems
                   rdf_overlap=rdf_overlap+rdf_all(m,basis_classes(k,j))* &
                               & rdf_all(m,basis_classes(l,j))*dx
                end do
-               mat_overlap(k,l)=1.d0-rdf_overlap
+               adf_overlap=0.d0
+               do m=1,ngrid
+                  adf_overlap=adf_overlap+adf_all(m,basis_classes(k,j))* &
+                              & adf_all(m,basis_classes(l,j))*da                
+               end do
+!
+!     Weight the RDF and ADF overlaps according to the value given within
+!      the -rdf2adf command
+!
+               mat_overlap(k,l)=1.d0-(rdf_overlap*rdf_weight+adf_overlap*adf_weight)
             end do
          end do 
+
+
 !
 !     Perform the hierarchial clustering of the current RDF overlap matrix
 !
@@ -1261,8 +1448,9 @@ do i=1,nelems
    end do
 
 end do
-
-
+write(*,*) " ... done!"
+write(*,*) 
+write(*,*) "Prepare final writeout of selected configurations..."
 !
 !     Finally, write out the newly generated ML_AB file!
 !
@@ -1270,13 +1458,13 @@ end do
 !
 allocate(conf_final(conf_num))
 allocate(trans_conf(conf_num))
-allocate(confbas_final(nbasis,nelems))
+allocate(confbas_final(maxval(nbasis),nelems))
 nconfs_out=0
 trans_conf=0
 inc3=0
 conf_final=0
 do i=1,nelems
-   do_basis: do j=1,nbasis
+   do_basis: do j=1,nbasis(i)
 !      write(*,*) final_choice(j,i),i,j
       inc2=confnum_all(final_choice(j,i))
       do k=1,inc3
@@ -1308,7 +1496,7 @@ end do
 max_around=maxval(sum(num_around,dim=1))
 open(unit=56,file="environments.xyz",status="replace")
 do i=1,nelems
-   do j=1,nbasis
+   do j=1,nbasis(i)
       write(56,*) max_around
       write(56,'(a,a,a,i8,a)') " ",el_list_glob(i)," basis atom ",j," (environment)"
       do k=1,max_around
@@ -1320,7 +1508,7 @@ end do
 close(56)
 
 write(*,*)
-write(*,*) "File 'environments.xyz' with local environments written."
+write(*,*) "File 'environments.xyz' with local environments of basis functions written."
 write(*,*)
 
 
@@ -1341,16 +1529,16 @@ write(56,'(i8)') nelems
 write(56,'(a)') "**************************************************"
 write(56,'(a)') "     The atom types in the data file"
 write(56,'(a)') "--------------------------------------------------"
-do i=1,int(nelems_glob/3)
+do i=1,int(nelems/3)
    write(56,'(a)',advance="no") "    "
    do j=1,3
       write(56,'(a,a)',advance="no") " ",el_list_glob((i-1)*3+j)
    end do   
    write(56,*) 
 end do
-if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+if (int(nelems/3)*3 .lt. nelems) then
    write(56,'(a)',advance="no") "    "     
-   do j=int(nelems_glob/3)*3,nelems_glob-1
+   do j=int(nelems/3)*3,nelems-1
       write(*,*) j,1+j   
       write(56,'(a,a)',advance="no") " ",el_list_glob(1+j)
    end do
@@ -1367,11 +1555,11 @@ write(56,'(i15)') nat_type_max
 write(56,'(a)') "**************************************************"
 write(56,'(a)') "     Reference atomic energy (eV)"
 write(56,'(a)') "--------------------------------------------------"
-do i=1,int(nelems_glob/3)
-   write(56,'(3e14.3)') 0.d0, 0.d0, 0.d0
+do i=1,int(nelems/3)
+   write(56,'(3e18.9)') 0.d0, 0.d0, 0.d0
 end do
-if (int(nelems_glob/3)*3 .lt. nelems_glob) then
-   do j=int(nelems_glob/3)*3,nelems_glob   
+if (int(nelems/3)*3 .lt. nelems) then
+   do j=int(nelems/3)*3,nelems 
       write(56,'(e18.10)',advance="no") 0.d0
    end do
    write(56,*)
@@ -1379,14 +1567,14 @@ end if
 write(56,'(a)') "**************************************************"
 write(56,'(a)') "     Atomic mass"
 write(56,'(a)') "--------------------------------------------------"
-do i=1,int(nelems_glob/3)
+do i=1,int(nelems/3)
    do j=1,3
       write(56,'(f20.12)',advance="no") at_mass_glob((i-1)*3+j)
    end do   
    write(56,*) 
 end do
-if (int(nelems_glob/3)*3 .lt. nelems_glob) then
-   do j=int(nelems_glob/3)*3,nelems_glob-1 
+if (int(nelems/3)*3 .lt. nelems) then
+   do j=int(nelems/3)*3,nelems-1 
       write(56,'(f20.12)',advance="no") at_mass_glob(1+j)
    end do
    write(56,*)
@@ -1394,17 +1582,17 @@ end if
 write(56,'(a)') "**************************************************"
 write(56,'(a)') "     The numbers of basis sets per atom type"
 write(56,'(a)') "--------------------------------------------------"
-do i=1,int(nelems_glob/3)
+do i=1,int(nelems/3)
    write(56,'(a)',advance="no") "    "
    do j=1,3
-      write(56,'(i7)',advance="no") nbasis
+      write(56,'(i7)',advance="no") nbasis(j)
    end do   
    write(56,*) 
 end do
-if (int(nelems_glob/3)*3 .lt. nelems_glob) then
+if (int(nelems/3)*3 .lt. nelems) then
    write(56,'(a)',advance="no") "    "     
-   do j=int(nelems_glob/3)*3,nelems_glob-1  
-      write(56,'(i7)',advance="no") nbasis
+   do j=int(nelems/3)*3,nelems-1  
+      write(56,'(i7)',advance="no") nbasis(j)
    end do
    write(56,*)
 end if
@@ -1417,29 +1605,82 @@ do i=1,nelems
    write(56,'(a)') "**************************************************"
    write(56,'(a,a)') "     Basis set for ",el_list_glob(i)
    write(56,'(a)') "--------------------------------------------------"
-   do j=1,nbasis
+   do j=1,nbasis(i)
       write(56,'(a,3i7)') "    ",j,trans_conf(confnum_all(final_choice(j,i))), &
                        & nat_all(final_choice(j,i))
    end do
 end do
-
+write(56,'(a)') "**************************************************"
 
 !
 !     Write out the information for all remaining configurations in the set
 !
 
 do i=1,nconfs_out
-   write(56,'(a)') "**************************************************"
    write(56,'(a,i7)') "     Configuration num. ",i
    write(56,'(a)') "=================================================="
    write(56,'(a)') "     System name"
    write(56,'(a)') "--------------------------------------------------"
-
-
-
+   write(56,'(a)') "     Reselected by mlff_select (VASP4CLINT)"
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     The number of atom types"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,'(i8)') nelems_confs(trans_conf(i))
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     The number of atoms"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,'(i11)') natoms(trans_conf(i))
+   write(56,'(a)') "**************************************************"
+   write(56,'(a)') "     Atom types and atom numbers"
+   write(56,'(a)') "--------------------------------------------------"
+   do j=1,nelems_confs(trans_conf(i))
+      write(56,'(a,a,i7)') "     ",el_list_confs(j,trans_conf(i)), &
+                           & el_nums_confs(j,trans_conf(i))
+   end do
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     CTIFOR"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,'(e18.9)') ctifors(trans_conf(i))  
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     Primitive lattice vectors (ang.)"
+   write(56,'(a)') "--------------------------------------------------"
+   do j=1,3
+      write(56,*) cells(:,j,trans_conf(i))
+   end do
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     Atomic positions (ang.)"
+   write(56,'(a)') "--------------------------------------------------"
+   do j=1,natoms(trans_conf(i))
+      write(56,*) xyz(:,j,trans_conf(i))
+   end do
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     Total energy (eV)"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,*) energies(trans_conf(i))
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     Forces (eV ang.^-1)"
+   write(56,'(a)') "--------------------------------------------------"
+   do j=1,natoms(trans_conf(i))
+      write(56,*) grads(:,j,trans_conf(i))
+   end do
+   write(56,'(a)') "=================================================="
+   write(56,'(a)') "     Stress (kbar)"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,'(a)') "     XX YY ZZ"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,*) stress(1:3,trans_conf(i))
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,'(a)') "     XY YZ ZX"
+   write(56,'(a)') "--------------------------------------------------"
+   write(56,*) stress(4:6,trans_conf(i))
+   write(56,'(a)') "**************************************************"
 end do
-
 close(56)
+
+write(*,*) "New ML_AB file written to file 'ML_AB_sel'."
+write(*,*)
+write(*,*) "mlff_select exiting normally."
+write(*,*)
 
 end program mlff_select
 
