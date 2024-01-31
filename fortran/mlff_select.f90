@@ -18,6 +18,7 @@ integer::inc_remain  ! remainder index for basis functions
 integer::mlab_num   ! number of ML_AB files to be read in
 integer,allocatable::incs(:)  ! moredimensional increment
 integer::readstat
+integer::basis_mode   ! if all elements have same basis or each one enother
 integer::nbasis(50)  ! desired number of local refs. in new ML_AB
 integer::nbasis_tmp(50)  ! for resorting of nbasis array, if needed
 integer::neigh_min_bas(50)  ! minimum number of confs. per neighbor bin
@@ -48,6 +49,7 @@ real(kind=8),allocatable::cells(:,:,:) ! the unit cells
 real(kind=8),allocatable::ctifors(:)  ! the CTIFOR values for all configurations
 real(kind=8),allocatable::stress(:,:)  ! stress tensors for all configurations
 real(kind=8),allocatable::angles(:)  ! list of angles for current environment
+real(kind=8)::time1,time2  ! Time measurement of program execution
 real(kind=8)::grad_min,grad_max  ! minimum and maximum gradient norm (global)
 real(kind=8)::grad_step  ! distance between two gradient bins
 real(kind=8)::normfac   ! normalizaion factor for RDFs and ADFs
@@ -135,45 +137,78 @@ write(*,*) " machine-learning force field from a given ML-AB file."
 write(*,*) "The procedure is similar to the VASP command ML_MODE = select,"
 write(*,*) " but is faster (since purely based on geometrical comparisons)"
 write(*,*) " and has more options to be adjusted (global approach)"
-write(*,*) "The following settings must be given by command line arguments:"
-write(*,*) " -ml_ab=[file1],[file2],... : The file names of the ML_AB files "
-write(*,*) "    that shall be processed by the program. Between 1 and 20 "
-write(*,*) "    can be given in total."
-write(*,*) " -nbasis=[number] : the [number] is the desired number of local"
-write(*,*) "    reference configurations (basis functions) per element in the"
-write(*,*) "    newly written ML_AB file. If this is chosen, each element"
-write(*,*) "    will have the same number of local ref. confs."
-write(*,*) " -nbasis_el=[el1:number1],[el2:number2],... : (Optional) give the"
-write(*,*) "    number of basis functions per element explicitly. If this is "
-write(*,*) "    done, one number must be given for each element appearing "
-write(*,*) "    in any of the ML_AB files! example: nbasis_el=Ga:3000,Pt:1000"
-write(*,*) " -grad_frac=[value] : percentage of basis functions to be "
-write(*,*) "    allocated for the largest gradient components in the "
-write(*,*) "    references. The [value]*nbasis atoms with the largest "
-write(*,*) "    will be taken all. Default: 0.1"
-write(*,*) " -train_div=[value] : the training set diversity (maximum: 1.0,"
-write(*,*) "    minimum: 0.0). The larger the value, the higher percentage"
-write(*,*) "    will be chosen based on different number of neighbor atoms,"
-write(*,*) "    such that the tails of the neighbor distribution will be "
-write(*,*) "    weighted larger (larger diversity). Default: 0.1"
-write(*,*) " -rdf2adf=[value] : Relative weighting of radial distribution "
-write(*,*) "    function (RDF) and angular distribution function (ADF) overlap"
-write(*,*) "    in constructing the clustering matrices. Example: -rdf2adf=2.0:"
-write(*,*) "    RDF will have 66% weight, ADF 33% (2 to 1). Default: 1.0"
-write(*,*) " -neigh_classes=[number] : Number of diversity-based neighborhood"
-write(*,*) "    classes (per number of atoms in the environment, the number"
-write(*,*) "    subdivisions, sorted by the diversity (respect to elements)"
-write(*,*) "    of the neighborhoods. Default: 4"
-write(*,*) " -bas_scale=('linear' or 'root') : How the number of basis functions"
-write(*,*) "    allocated to a certain neighborhood class shall scale with"
-write(*,*) "    the number of atoms contained into it."
-write(*,*) "    possibe are: 'linear' (linear scaling) or 'root' (square root"
-write(*,*) "    scaling). The linear scaling will give more spots to classes "
-write(*,*) "    with many atoms, whereas the root scaling will favor those"
-write(*,*) "    with lower number of atoms. Default: linear"
 write(*,*) "Usage: mlff_select [list of command line arguments]"
+write(*,*) " mlff_select -help  prints a list of all commands."
 write(*,*)
 
+if (command_argument_count() .eq. 0) then
+   stop
+end if        
+!
+!     If the list of all commands shall be printed with the help command
+!
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:5))  .eq. "-help") then
+      write(*,*) " ------ LIST OF COMMANDS ------ "
+      write(*,*) " all settings without default value must be given explicitly by "
+      write(*,*) " one of the commands, all others are optional." 
+      write(*,*) " -ml_ab=[file1],[file2],... : The file names of the ML_AB files "
+      write(*,*) "    that shall be processed by the program. Between 1 and 20 "
+      write(*,*) "    can be given in total."
+      write(*,*) " -nbasis=[number] : the [number] is the desired number of local"
+      write(*,*) "    reference configurations (basis functions) per element in the"
+      write(*,*) "    newly written ML_AB file. If this is chosen, each element"
+      write(*,*) "    will have the same number of local ref. confs."
+      write(*,*) "    Very small values (below 1000) might lead to problems with the"
+      write(*,*) "    neighborhood allocations (and will give a bad ML_FF anyway)."
+      write(*,*) " -nbasis_el=[el1:number1],[el2:number2],... : (Optional) give the"
+      write(*,*) "    number of basis functions per element explicitly. If this is "
+      write(*,*) "    done, one number must be given for each element appearing "
+      write(*,*) "    in any of the ML_AB files! example: nbasis_el=Ga:3000,Pt:1000"
+      write(*,*) " -cutoff=[value] : The radial and angular cutoffs used during the"
+      write(*,*) "    learning (ML_RCUT1, ML_RCUT2). Only one global value can be "
+      write(*,*) "    given for all ML_AB files. It might be reasonable to try "
+      write(*,*) "    a value different to the ones during learning. DEFAULT: 5.0"
+      write(*,*) " -grad_frac=[value] : percentage of basis functions to be "
+      write(*,*) "    allocated for the largest gradient components in the "
+      write(*,*) "    references. The [value]*nbasis atoms with the largest "
+      write(*,*) "    will be taken all. DEFAULT: 0.1"
+      write(*,*) " -train_div=[value] : the training set diversity (maximum: 1.0,"
+      write(*,*) "    minimum: 0.0). The larger the value, the higher percentage"
+      write(*,*) "    will be chosen based on different number of neighbor atoms,"
+      write(*,*) "    such that the tails of the neighbor distribution will be "
+      write(*,*) "    weighted larger (larger diversity). DEFAULT: 0.1"
+      write(*,*) " -rdf2adf=[value] : Relative weighting of radial distribution "
+      write(*,*) "    function (RDF) and angular distribution function (ADF) overlap"
+      write(*,*) "    in constructing the clustering matrices. Example: -rdf2adf=2.0:"
+      write(*,*) "    RDF will have 66% weight, ADF 33% (2 to 1). DEFAULT: 1.0"
+      write(*,*) " -neigh_classes=[number] : Number of diversity-based neighborhood"
+      write(*,*) "    classes (per number of atoms in the environment, the number"
+      write(*,*) "    subdivisions, sorted by the diversity (respect to elements)"
+      write(*,*) "    of the neighborhoods. DEFAULT: 4"
+      write(*,*) " -bas_scale=('linear' or 'root') : How the number of basis functions"
+      write(*,*) "    allocated to a certain neighborhood class shall scale with"
+      write(*,*) "    the number of atoms contained into it."
+      write(*,*) "    possibe are: 'linear' (linear scaling) or 'root' (square root"
+      write(*,*) "    scaling). The linear scaling will give more spots to classes "
+      write(*,*) "    with many atoms, whereas the root scaling will favor those"
+      write(*,*) "    with lower number of atoms. DEFAULT: linear"
+      write(*,*) " -max_environ=[number] : Maximum number of atoms within the cutoff "
+      write(*,*) "    radius of any atom in the given structures. This value might "
+      write(*,*) "    be raised if a larger cutoff shall be used. DEFAULT: 100"
+      write(*,*) " -s_grid=[number] : Number of grid points for calculation of RDF"
+      write(*,*) "    and ADF overlap integrals. DEFAULT: 500"
+      write(*,*) " -rdf_exp=[value] : Exponential prefactor for line broadening "
+      write(*,*) "    Gaussians in RDF profile calculations. DEFAULT: 20.0"
+      write(*,*) " -adf_exp=[value] : Exponential prefactor for line broadening "
+      write(*,*) "    Gaussians in ADF profile calculations. DEFAULT: 0.5"
+      write(*,*) 
+      stop
+   end if
+end do
+
+call cpu_time(time1)
 !
 !     Read in names of ML_AB files that shall be processed
 !
@@ -211,6 +246,7 @@ end if
 !     Option 1: global number for all elements in the ML_AB files
 !
 nbasis=0
+basis_mode=0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:8))  .eq. "-nbasis=") then
@@ -221,6 +257,7 @@ do i = 1, command_argument_count()
          stop
       end if
       nbasis=inc
+      basis_mode=1
    end if
 end do
 !
@@ -237,9 +274,10 @@ do i = 1, command_argument_count()
      !    write(*,*)
      !    stop
       end if
+      basis_mode=2
    end if
 end do
-
+el_list_bas="XX"
 do i=1,50
    if (basis_read(i) .eq. "xxxx") exit
    do j=1,50
@@ -252,15 +290,40 @@ end do
 
 if (sum(nbasis) .lt. 1) then
    write(*,*) "Please give the number of local reference configurations after selection"
-   write(*,*) " with the keyword -nbasis=[number]! Recommended are 2000-6000"
+   write(*,*) " with the keyword -nbasis=[number] or -nbasis_el=[el1:number1],[el2:number2],..."
+   write(*,*) "Recommended are values between 2000 and 8000"
    write(*,*)
+   stop
+end if
+
+!
+!     The cutoff used during the learning process
+!
+!
+!     Default value for the cutoff: 5 Ang
+!
+cutoff=5.d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:8))  .eq. "-cutoff=") then
+      read(arg(9:),*,iostat=readstat) cutoff
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -cutoff=[value] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (cutoff .lt. 0.0d0) then
+   write(*,*) "Please give a reasonable value for the radial and angular cutoffs "
+   write(*,*) " used during the learning (or shall be used during selection)"
    stop
 end if
 
 !
 !     The fraction of basis functions based on the largest gradient norms
 !
-grad_frac=-1.d0
+grad_frac=0.1d0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:11))  .eq. "-grad_frac=") then
@@ -283,7 +346,7 @@ end if
 !
 !     The training set diversity (1: max, 0 min)
 !
-train_div=-1.d0
+train_div=0.1d0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:11))  .eq. "-train_div=") then
@@ -328,7 +391,7 @@ adf_weight=1.d0/(rdf_adf+1.d0)
 !
 !     The number of neighborhood classes
 !
-neigh_classes=0
+neigh_classes=4
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:15))  .eq. "-neigh_classes=") then
@@ -352,7 +415,7 @@ end if
 !     If the number of basis functions for the neighborhood classes shall be scaling
 !      linear or square root with the number of contained atoms
 !
-bas_scale="none"
+bas_scale="linear"
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:11))  .eq. "-bas_scale=") then
@@ -374,25 +437,97 @@ if ((bas_scale .ne. "linear") .and. (bas_scale .ne. "root")) then
 end if
 
 !
-!     Number of basis functions allocated to minimum into different neighbor bins 
+!     Maximum number of atoms in environment (assumed)
 !
-do i=1,nelems
-   neigh_min_bas(i)=int(nbasis(i)*train_div)
+max_environ=100
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:13))  .eq. "-max_environ=") then
+      read(arg(14:),*,iostat=readstat) max_environ
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -max_environ=(number) command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
 end do
-do i=1,nelems
-   write(*,'(a,a,a,i7)') "  ",el_list_glob(i),": Number of desired local reference &
-                & configuraitons:",nbasis
-   write(*,'(a,a,a,i7)') "  ",el_list_glob(i),": Number of configurations allocated &
-                & uniformly for neighbor-bins:",neigh_min_bas
+if (max_environ .le. 1) then
+   write(*,*) "Please give a number for the maximum number of atoms within the cutoff "
+   write(*,*) "  radius of any other atom! (default: 500)"
+   write(*,*)
+   stop
+end if
+
+
+!
+!     Number of grid points of numerical radial distribution functions
+!
+ngrid=500
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:8))  .eq. "-s_grid=") then
+      read(arg(9:),*,iostat=readstat) ngrid
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -s_grid=(number) command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
 end do
+if (ngrid .le. 1) then
+   write(*,*) "Please give a reasonable value for the number of RDF/ADF integration "
+   write(*,*) " grid points! (default: 500)."   
+   write(*,*)
+   stop
+end if
+
+!
+!     Exponent for RDF Gaussian
+!
+alpha_r=20.0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:8))  .eq. "-rdf_exp=") then
+      read(arg(9:),*,iostat=readstat) alpha_r
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -rdf_exp=[number] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (alpha_r .lt. 0.0001d0) then
+   write(*,*) "Please give the preexponential factor of the Gaussian used to broaden"
+   write(*,*) " the RDF profiles of all atoms."
+   write(*,*)
+   stop
+end if
+!
+!     Exponent for ADF Gaussian
+!
+alpha_a=0.5d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:8))  .eq. "-adf_exp=") then
+      read(arg(9:),*,iostat=readstat) alpha_a
+      if (readstat .ne. 0) then
+         write(*,*) "The format of the -adf_exp=[number] command seems to be corrupted!"
+         write(*,*)
+         stop
+      end if
+   end if
+end do
+if (alpha_a .lt. 0.0001d0) then
+   write(*,*) "Please give the preexponential factor of the Gaussian used to broaden"
+   write(*,*) " the ADF profiles of all atoms."
+   write(*,*)
+   stop
+end if
+
 !
 !     Define the Pi
 !
 pi=4d0*atan(1.0d0)
-!
-!     Default value for the cutoff: 5 Ang
-!
-cutoff=5.d0
 !
 !     Default values for local and global elements array
 !
@@ -404,14 +539,6 @@ el_list_loc="XX"
 ind_list=0
 nelems_all=0
 !
-!     Maximum number of atoms in environment (assumed)
-!
-max_environ=100
-!
-!     Number of grid points of numerical radial distribution functions
-!
-ngrid=500
-!
 !     Length between two x values on RDF grid (Ang.)
 !
 dx=cutoff/real(ngrid)
@@ -419,14 +546,47 @@ dx=cutoff/real(ngrid)
 !     Length between two angle values on ADF grid (degrees)
 !
 da=180.d0/real(ngrid)
+
 !
-!     Exponent for RDF Gaussian
+!     Print out all settings for information
 !
-alpha_r=20.0
-!
-!     Exponent for ADF Gaussian
-!
-alpha_a=0.5d0
+write(*,*) "------------- CALCULATION SETTINGS ---------------"
+write(*,*) "List of ML_AB files to be read in:"
+do i=1,mlab_num
+   if (i .lt. 10) then
+      write(*,'(a,i1,a,a)',advance="no") "   (",i,") ",trim(mlab_list(i))
+   else 
+      write(*,'(a,i2,a,a)',advance="no") " (",i,") ",trim(mlab_list(i))
+   end if        
+end do
+write(*,*)
+if (basis_mode .eq. 1) then
+   write(*,*) "Number of basis functions for all elements: ",nbasis(1) 
+else if (basis_mode .eq. 2) then
+   write(*,*) "Number of basis functions for each element, separately:"
+   do i=1,50
+      if (el_list_bas(i) .eq. "XX") exit
+      write(*,'(a,a,a,i8)') "  * ",el_list_bas(i),":  ",nbasis(i)
+   end do
+end if
+write(*,'(a,f10.4,a)') " The ML_FF descriptor cutoff is ",cutoff," Angstrom."
+write(*,'(a,f10.4,a)') " ",grad_frac*100d0," % of basis functions allocated for large gradients."
+write(*,'(a,f10.4,a)') " ",train_div*100d0," % of basis functions allocated uniformly."
+write(*,'(a,f8.3,a,f8.3,a)') " Weighting of overlap matrices: ",rdf_weight*100d0, &
+                   & " % RDF, ",adf_weight*100d0," % ADF."
+write(*,'(a,i5)') " Number of neighborhood classes per environment & 
+               &size:",neigh_classes 
+if (bas_scale .eq. "linear") then
+   write(*,*) "Number of basis functions per neighborhood class scaled linearly."
+else if (bas_scale .eq. "root") then     
+   write(*,*) "Number of basis functions per neighborhood class scaled with square root."
+end if
+write(*,'(a,i6)') " Maximum number of atoms within the cutoff of any atom: ",max_environ
+write(*,'(a,i8)') " Number of grid points for RDF/ADF overlap integrations: ",ngrid
+write(*,'(a,f10.4)') " Exponential prefactor for RDF line broadening: ",alpha_r
+write(*,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
+write(*,*) "--------------------------------------------------"
+write(*,*)
 
 ! ####################################################
 !     Loop over all ML_AB files given in the list and read in their content
@@ -573,15 +733,26 @@ end do
 !     Compare global element list with basis functions element list
 !     and resort the latter (or throw an error if something is missing)
 !
-do i=1,nelems_glob
-   do j=1,nelems_glob
-      if (el_list_glob(i) .eq. el_list_bas(j)) then
-         nbasis_tmp(j)=nbasis(i)
-         cycle
-      end if
+if (basis_mode .eq. 2) then
+   do i=1,nelems_glob
+      do j=1,nelems_glob
+         if (el_list_glob(i) .eq. el_list_bas(j)) then
+            nbasis_tmp(j)=nbasis(i)
+            cycle
+         end if
+      end do
    end do
+   nbasis=nbasis_tmp
+end if
+
+!
+!     Number of basis functions allocated to minimum into different neighbor bins
+!
+neigh_min_bas=0
+do i=1,nelems_glob
+   neigh_min_bas(i)=int(nbasis(i)*train_div)
 end do
-nbasis=nbasis_tmp
+
 !
 !     Determine global different element indices
 !
@@ -798,7 +969,6 @@ allocate(final_choice(maxval(nbasis),nelems))
 
 
 
-
 num_around=0
 rdf_all=0.d0
 adf_all=0.d0
@@ -932,6 +1102,21 @@ do i=1,conf_num
    end do
 end do
 write(*,*) " ... finished!"
+
+write(*,*)
+write(*,*) " Element   No. of atoms       Basis size       atom usage (%)"
+do i=1,nelems
+   inc=0
+   do j=1,natoms_sum
+      if (ind_all(j) .eq. ind_list(i)) then
+         inc=inc+1
+      end if        
+   end do
+   write(*,'(3a,i10,a,i10,a,f12.6)') "   ", el_list_glob(i)," : ",inc, "         ",nbasis(i), &
+                  & "          ",real(real(nbasis(i))/real(inc)*100.d0)
+end do
+write(*,*)
+
 !
 !     All atoms are still available
 !
@@ -1025,6 +1210,7 @@ do
    end if
    gradnorm_all(inc)=0.d0
 end do
+
 write(*,*) " ... done!"
 write(*,*) "Sort the configs. according to the number of their neighbors..."
 !    
@@ -1056,7 +1242,7 @@ do_elems: do i=1,nelems
    inc=grad_pre(i)
    do_column:  do
       do_environ: do j=1,max_environ
-         if (inc .gt. neigh_min_bas(i)+grad_pre(i)) exit do_column
+         if (inc .ge. neigh_min_bas(i)+grad_pre(i)) exit do_column
          if (neigh_bas(i,j) .lt. neigh_global(i,j)) then
             neigh_bas(i,j)=neigh_bas(i,j)+1
             do_atoms: do k=1,natoms_sum
@@ -1068,6 +1254,7 @@ do_elems: do i=1,nelems
                   if (neighnum_global(k) .eq. j) then
                      atom_used(k) = .false.
                      inc=inc+1
+        !             neigh_bas(i,j)=neigh_bas(i,j)+1
                      final_choice(inc,i)=k
                      exit do_atoms
                   end if
@@ -1087,8 +1274,14 @@ write(59,*) "#Here, the number of neighbors around atoms in ML_AB are"
 write(59,*) "#summed and packed into bins, where the number of atoms with "
 write(59,*) "#with an environment of certain size (total number) is listed,"
 write(59,*) "#sorted by element."
+write(59,'(a)',advance="no") "#  No. neighbors      "
+do i=1,nelems
+   write(59,'(a,a)',advance="no") el_list_glob(i),"          "
+end do
+write(59,*)
+
 do i=1,max_environ
-   write(59,*) i,real(neigh_global(:,i)),real(neigh_bas(:,i))
+   write(59,*) i,neigh_global(1:nelems,i)!,neigh_bas(:,i)
 
 end do
 close(59)
@@ -1465,7 +1658,6 @@ inc3=0
 conf_final=0
 do i=1,nelems
    do_basis: do j=1,nbasis(i)
-!      write(*,*) final_choice(j,i),i,j
       inc2=confnum_all(final_choice(j,i))
       do k=1,inc3
          if (inc2 .eq. conf_final(k)) then
@@ -1484,7 +1676,7 @@ nconfs_out=inc3
 do i=1,conf_num
    do j=1,nconfs_out
       if (conf_final(j) .eq. i) then
-         trans_conf(i)=j
+         trans_conf(j)=i
       end if     
    end do
 end do
@@ -1510,7 +1702,6 @@ close(56)
 write(*,*)
 write(*,*) "File 'environments.xyz' with local environments of basis functions written."
 write(*,*)
-
 
 
 !
@@ -1539,7 +1730,6 @@ end do
 if (int(nelems/3)*3 .lt. nelems) then
    write(56,'(a)',advance="no") "    "     
    do j=int(nelems/3)*3,nelems-1
-      write(*,*) j,1+j   
       write(56,'(a,a)',advance="no") " ",el_list_glob(1+j)
    end do
    write(56,*)
@@ -1590,11 +1780,13 @@ do i=1,int(nelems/3)
    write(56,*) 
 end do
 if (int(nelems/3)*3 .lt. nelems) then
-   write(56,'(a)',advance="no") "    "     
-   do j=int(nelems/3)*3,nelems-1  
-      write(56,'(i7)',advance="no") nbasis(j)
-   end do
-   write(56,*)
+   if ((nelems-int(nelems/3)*3) .eq. 3) then
+      write(56,'(3i7)') nbasis(1:3)     
+   else if ((nelems-int(nelems/3)*3) .eq. 2) then   
+      write(56,'(2i7)') nbasis(1:2)
+   else if ((nelems-int(nelems/3)*3) .eq. 1) then
+      write(56,'(i7)') nbasis(1)
+   end if
 end if
 
 !
@@ -1606,7 +1798,7 @@ do i=1,nelems
    write(56,'(a,a)') "     Basis set for ",el_list_glob(i)
    write(56,'(a)') "--------------------------------------------------"
    do j=1,nbasis(i)
-      write(56,'(a,3i7)') "    ",j,trans_conf(confnum_all(final_choice(j,i))), &
+      write(56,'(a,3i7)') "    ",trans_conf(confnum_all(final_choice(j,i))), &
                        & nat_all(final_choice(j,i))
    end do
 end do
@@ -1677,10 +1869,14 @@ do i=1,nconfs_out
 end do
 close(56)
 
+call cpu_time(time2)
+
 write(*,*) "New ML_AB file written to file 'ML_AB_sel'."
 write(*,*)
-write(*,*) "mlff_select exiting normally."
+write(*,'(a,f12.4,a)') " Total execution time: ",time2-time1," seconds"
+write(*,*) "mlff_select finished normally."
 write(*,*)
+
 
 end program mlff_select
 
