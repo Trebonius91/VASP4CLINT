@@ -108,6 +108,7 @@ integer,allocatable::atsel_grad(:,:)  ! the atom indices of the largest gradnorm
 integer,allocatable::neighnum_global(:)  ! sum of all neighbors for all atoms
 integer,allocatable::neigh_div1(:,:),neigh_div2(:,:)  ! the neighborhood diversities
 integer,allocatable::basis_sizes(:)  ! sizes of all basis classes (per element)
+integer,allocatable::bas_neighs(:)  ! total number of neighbors per class
 integer,allocatable::basis_classes(:,:)  ! list of atoms in each basis class
 integer,allocatable::k_number(:)   ! list of k-means spots for basis classes
 integer,allocatable::smallest(:)  ! atom list with smallest mutual overlaps
@@ -198,7 +199,7 @@ do i = 1, command_argument_count()
       write(*,*) "    radius of any atom in the given structures. This value might "
       write(*,*) "    be raised if a larger cutoff shall be used. DEFAULT: 100"
       write(*,*) " -s_grid=[number] : Number of grid points for calculation of RDF"
-      write(*,*) "    and ADF overlap integrals. DEFAULT: 500"
+      write(*,*) "    and ADF overlap integrals. DEFAULT: 200"
       write(*,*) " -rdf_exp=[value] : Exponential prefactor for line broadening "
       write(*,*) "    Gaussians in RDF profile calculations. DEFAULT: 20.0"
       write(*,*) " -adf_exp=[value] : Exponential prefactor for line broadening "
@@ -462,7 +463,7 @@ end if
 !
 !     Number of grid points of numerical radial distribution functions
 !
-ngrid=500
+ngrid=200
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:8))  .eq. "-s_grid=") then
@@ -476,7 +477,7 @@ do i = 1, command_argument_count()
 end do
 if (ngrid .le. 1) then
    write(*,*) "Please give a reasonable value for the number of RDF/ADF integration "
-   write(*,*) " grid points! (default: 500)."   
+   write(*,*) " grid points! (default: 200)."   
    write(*,*)
    stop
 end if
@@ -672,16 +673,25 @@ do l=1,mlab_num
    read(56,*)
    read(56,*)
    read(56,*)
-   read(56,*)
    do i=1,int(nelems_local(l)/3)
       read(56,*)
    end do
+   if (int(nelems_local(l)/3)*3 .lt. nelems_local(l)) then
+      if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 3) then
+         read(56,*)
+      else if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 2) then
+         read(56,*) 
+      else if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 1) then
+         read(56,*) 
+      end if
+   end if
+
    read(56,*) 
    read(56,*)
    read(56,*)
    at_mass(:,l)=0.d0 
    do i=1,int(nelems_local(l)/3)
-      read(56,*) at_mass((i-1)*3+1:i*3,l)
+      read(56,*,iostat=readstat) at_mass((i-1)*3+1:i*3,l)
    end do
    if (int(nelems_local(l)/3)*3 .lt. nelems_local(l)) then
       if ((nelems_local(l)-int(nelems_local(l)/3)*3) .eq. 3) then
@@ -1298,7 +1308,8 @@ write(*,*) " and ADF overlap matrices."
 !      Outer loop over elements: separate calculation for each element!
 !
 do i=1,nelems
-   write(*,*) "Clustering all ",el_list_glob(i)," atoms ..."
+   write(*,*)
+   write(*,*) "Cluster all ",el_list_glob(i)," atoms ..."
 !
 !     Number of available basis functions:
 !
@@ -1318,11 +1329,13 @@ do i=1,nelems
    if (allocated(basis_classes)) deallocate(basis_classes)
    if (allocated(neigh_div1)) deallocate(neigh_div1)
    if (allocated(neigh_div2)) deallocate(neigh_div2)
+   if (allocated(bas_neighs)) deallocate(bas_neighs)
 !
 !     Add an extra dimension (+1) as remainder for all classes with less 
 !     then 10 atoms
 !
    allocate(basis_sizes(inc*neigh_classes+1))
+   allocate(bas_neighs(inc*neigh_classes+1))
    allocate(basis_classes(maxval(neigh_global-neigh_bas),inc*neigh_classes+1))
    allocate(neigh_div1(2,maxval(neigh_global-neigh_bas)))
    allocate(neigh_div2(2,maxval(neigh_global-neigh_bas)))
@@ -1372,8 +1385,10 @@ do i=1,nelems
          do k=1,neigh_classes-1
             if ((inc/neigh_classes) .lt. 10) then
                basis_sizes(remain_class)=basis_sizes(remain_class)+inc/neigh_classes
+               bas_neighs(remain_class)=max_environ+1
             else
                basis_sizes((inc3-1)*neigh_classes+k)=inc/neigh_classes  
+               bas_neighs((inc3-1)*neigh_classes+k)=j
             end if
             if ((inc/neigh_classes) .lt. 10) then
                do l=1,inc/neigh_classes
@@ -1390,8 +1405,10 @@ do i=1,nelems
          end do  
          if ((inc-inc4) .lt. 10) then 
             basis_sizes(remain_class)=basis_sizes(remain_class)+inc-inc4
+            bas_neighs(remain_class)=max_environ+1
          else
             basis_sizes(inc3*neigh_classes)=inc-inc4
+            bas_neighs(inc3*neigh_classes)=j
          end if
          if ((inc-inc4) .lt. 10) then
             do l=1,inc-inc4
@@ -1450,15 +1467,16 @@ do i=1,nelems
 
       end if
    end do
+
 !
-!     If the tota number of basis functions is too high or too low, increase 
+!     If the total number of basis functions is too high or too low, increase 
 !     or decrease them until the exact number is reached
 !
    if (sum(k_number(1:size(basis_sizes))) .gt. spots_avail) then
       inc_remain=sum(k_number(1:size(basis_sizes)))-spots_avail
       decrem: do 
          do j=1,size(basis_sizes)
-            if (k_number(j) .gt. 1) then
+            if (k_number(j) .ge. 5) then
                k_number(j) = k_number(j)-1
                inc_remain=inc_remain-1
                if (inc_remain .lt. 1) exit decrem
@@ -1470,10 +1488,10 @@ do i=1,nelems
       inc_remain=spots_avail-sum(k_number(1:size(basis_sizes)))
       increm: do
          do j=1,size(basis_sizes)
-            if (k_number(j) .ge. 1) then
+            if (k_number(j) .ge. 5) then
                k_number(j) = k_number(j)+1
-               inc_remain=inc_remain+1
-               if (inc_remain .gt. -1) exit increm
+               inc_remain=inc_remain-1
+               if (inc_remain .lt. 1) exit increm
             end if
          end do
       end do increm
@@ -1489,6 +1507,16 @@ do i=1,nelems
       allocate(hierarchy(basis_sizes(j),basis_sizes(j)))
       mat_overlap=1.1d0
       if (k_number(j) .gt. 0) then
+         if (j .gt. 1) then
+            if (bas_neighs(j) .ne. bas_neighs(j-1)) then
+                if (j .eq. size(basis_sizes)) then
+                   write(*,*) " Cluster the remaining atoms ..."
+                else
+                   write(*,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
+                end if         
+            end if
+         end if     
+                    
          do k=1,basis_sizes(j)
             do l=1,k-1
 !
@@ -1609,7 +1637,8 @@ do i=1,nelems
 !      the number of needed basis functions, one function is then taken from
 !      each cluster
 !     The first atom always belongs to a new cluster and is thus always taken
-
+!
+         if (inc_atom .gt. nbasis(i)) cycle 
          final_choice(inc_atom,i)=basis_classes(1,j)
          inc_atom=inc_atom+1 
 
@@ -1618,7 +1647,8 @@ do i=1,nelems
             write(*,*) "For one neighborhood class, the number of basis functions to "
             write(*,*) " be allocated is larger than the total number of atoms in this"
             write(*,'(a,i7,a,i7,a)') " spot! (current:",k_number(j),", allowed:",basis_sizes(j)," )"
-            write(*,*) "Please reduce the number of basis functions for ",el_list_glob(i),"!"
+            write(*,*) "Please reduce the number of neigh_classes (globally) or the "
+            write(*,*) "  number of basis functions for ",el_list_glob(i),"!"
             stop 
          end if        
          atom_list: do k=2,basis_sizes(j)
@@ -1631,7 +1661,8 @@ do i=1,nelems
                   if (hierarchy(l,inc_act) .eq. hierarchy(k,inc_act)) then 
                      cycle atom_list
                   end if                            
-               end do      
+               end do   
+               if (inc_atom .gt. nbasis(i)) cycle atom_list   
                final_choice(inc_atom,i)=basis_classes(k,j)
                inc_atom=inc_atom+1              
             end if        
@@ -1644,6 +1675,13 @@ end do
 write(*,*) " ... done!"
 write(*,*) 
 write(*,*) "Prepare final writeout of selected configurations..."
+
+do i=1,nelems
+   do j=1,nbasis(i)
+      write(23,*) i,j,final_choice(j,i)
+   end do
+end do
+
 !
 !     Finally, write out the newly generated ML_AB file!
 !
@@ -1656,6 +1694,7 @@ nconfs_out=0
 trans_conf=0
 inc3=0
 conf_final=0
+
 do i=1,nelems
    do_basis: do j=1,nbasis(i)
       inc2=confnum_all(final_choice(j,i))
@@ -1681,6 +1720,9 @@ do i=1,conf_num
    end do
 end do
 
+do i=1,nconfs_out
+   write(*,*) i,trans_conf(i)
+end do
 
 !
 !     Write local environments of all chosen basis atoms to a trajectory file
