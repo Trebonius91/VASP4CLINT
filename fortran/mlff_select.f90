@@ -1709,7 +1709,7 @@ do i=1,nelems
 end do
 nconfs_out=inc3
 !
-!    Initialize array for translation from old to knew configuration numbers
+!    Initialize array for translation from new to old configuration numbers
 !    (important if not all old configurations will be part of the new ML_AB)
 !
 do i=1,conf_num
@@ -1720,9 +1720,37 @@ do i=1,conf_num
    end do
 end do
 
+!
+!     Initialize array for reverse translation from old to new configuration
+!     numbers, important for list of basis functions and configurations
+!
+conf_final=0
 do i=1,nconfs_out
-   write(*,*) i,trans_conf(i)
+   do j=1,conf_num
+      if (trans_conf(i) .eq. j) then
+         conf_final(j)=i
+      end if        
+   end do
 end do
+
+
+open(unit=45,file="trans_conf.dat")
+do i=1,nconfs_out
+   write(45,*) i,trans_conf(i)
+end do
+close(45)
+
+open(unit=45,file="final_choice.dat")
+do i=1,nbasis(1)
+   write(45,*) i,final_choice(i,:)
+end do
+close(45)
+
+open(unit=45,file="conf_reverse.dat")
+do i=1,conf_num
+   write(45,*) i,conf_final(i)
+end do
+close(45)
 
 !
 !     Write local environments of all chosen basis atoms to a trajectory file
@@ -1840,7 +1868,7 @@ do i=1,nelems
    write(56,'(a,a)') "     Basis set for ",el_list_glob(i)
    write(56,'(a)') "--------------------------------------------------"
    do j=1,nbasis(i)
-      write(56,'(a,3i7)') "    ",trans_conf(confnum_all(final_choice(j,i))), &
+      write(56,'(a,3i7)') "    ",conf_final(confnum_all(final_choice(j,i))), &
                        & nat_all(final_choice(j,i))
    end do
 end do
