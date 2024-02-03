@@ -1,6 +1,17 @@
-#!/usr/bin/env python3.6
+#!/usr/bin/env python3
+#
+#    struc_insert: Inserts a molecule, cluster or surface
+#      (given by POSCAR_insert) into a solvent, solid or 
+#      similar structure (given by POSCAR_solvent) 
+#      All atoms of the POSCAR_solvent located at the 
+#      future position of POSCAR_insert will be removed.   
+#    Part of VASP4CLINT
+#     Julien Steffen, 2024 (julien.steffen@fau.de)
+#
+
 import sys 
 import os 
+import re
 import numpy as np
 from scipy.spatial import distance_matrix
 
@@ -11,20 +22,19 @@ For this, all atoms of B in the region where A is placed will be
 removed.
 The unitcell of B should be much larger than A in order to contain it.
 The dimensions of B will be taken as dimensions of the result.
-Strukture A must be stored in POSCAR_insert, structure B must be stored
-in POSCAR_solvent. Both must be given in cartesian coordinates!
-In addition, the desired center of mass position of structure A must
-be given in the file insert_com.dat (x,y,z in one line, in Angstrom)
+Two POSCAR files are needed (both without selective dynamics!):
+ - POSCAR_insert, containing the inserted structure A 
+ - POSCAR_solvent, containing the solvent structure B 
+The following keywords can/must be given:
+ -center=x,y,z : Gives the center of mass position of the inserted 
+    structure, within the solvent box. The values must be given in 
+    Angstrom. Example: center=20.0,25.0,10.0
+ -buffer=value : The distance between the solvent atoms and any atom
+    of the inserted structure, below which the respective solvent 
+    atom is deleted. Default: 2.8 (Angstrom). Example -buffer=3.5
 
 The result will be written in POSCAR.
 ''')
-
-#
-#    Global, predefined parameters
-#
-#    the distance, below which atoms of the solvent are removed (in Angstrom)
-
-dist_remove = 2.8
 
 
 # Dictionary of all elements matched with their atomic masses.
@@ -58,20 +68,131 @@ elements_dict = {'H' : 1.008,'He' : 4.003, 'Li' : 6.941, 'Be' : 9.012,\
                  'Nh' : 284, 'Fl' : 289, 'Mc' : 288, 'Lv' : 292, 'Ts' : 294,\
                  'Og' : 294}
 
+#
+#    the distance, below which atoms of the solvent are removed (in Angstrom)
+#
+dist_remove = 2.8
 
+#
+#    Always assume a global system scale of 1.0
+#
+sys_scale=1.0
+#
+#    Read in the command line arguments
+#
+read_center=False
+
+for arg in sys.argv:
+   if re.search("=",arg):
+      param,actval=arg.split("=")
+      if param == "-center":
+         com_insert_read=actval.split(",")
+         read_center=True
+      if param == "-buffer":
+         dist_remove=float(actval)
+         bottom=True
+
+if not read_center:
+   print("Please give the desired insertion center of mass with the -center keyword!")
+   sys.exit(1)
+
+com_insert=np.zeros(3)
+inc=0
+for el in com_insert_read:
+   com_insert[inc]=float(el)
+   inc=inc+1
+
+inc=inc-1
+if inc < 2:
+   print("Please give at least three values for the -center keyword!")
+   sys.exit(1)
+if inc > 2:
+   print("Please give no more than three values for the -center keyword!")
+   sys.exit(1)
+
+print("Given settings:")
+print(" - Inserted center of mass positions: x=",com_insert_read[0],", y=",com_insert_read[1],", z=",com_insert_read[2])
+print(" - Buffer distance : ",str(dist_remove))
+print(" ")
 #
 #    Read in the coordinates of structure A (inserted crystal or structure)
 #
+
+# Define coordinate transformation as functions in order to use them intermediately!
+# F1: FRAC2CART
+def trans_frac2cart(xyz,natoms,a_vec,b_vec,c_vec):
+   xyz_cart = np.zeros((natoms,3))
+   for i in range(natoms):
+      xyz_cart[i][0]=(xyz[i][0]*a_vec[0]+xyz[i][1]*b_vec[0]+\
+                     xyz[i][2]*c_vec[0])*sys_scale
+      xyz_cart[i][1]=(xyz[i][0]*a_vec[1]+xyz[i][1]*b_vec[1]+\
+                     xyz[i][2]*c_vec[1])*sys_scale
+      xyz_cart[i][2]=(xyz[i][0]*a_vec[2]+xyz[i][1]*b_vec[2]+\
+                     xyz[i][2]*c_vec[2])*sys_scale
+            
+   return xyz_cart
+   
+# F2: CART2FRAC
+def trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec):
+   xyz_frac = np.zeros((natoms,3))
+   act_vec = np.zeros((3))
+   vec_mat=np.zeros((3,3))
+#
+#   Build direct from cartesian coordinates by inverting the 
+#   unit cell vector matrix and multiplying it to the coordinate vector
+#
+
+   vec_mat[0][0]=a_vec[0]
+   vec_mat[1][0]=a_vec[1]
+   vec_mat[2][0]=a_vec[2]
+   vec_mat[0][1]=b_vec[0]
+   vec_mat[1][1]=b_vec[1]
+   vec_mat[2][1]=b_vec[2]
+   vec_mat[0][2]=c_vec[0]
+   vec_mat[1][2]=c_vec[1]
+   vec_mat[2][2]=c_vec[2]
+
+   mat_inv=np.linalg.inv(vec_mat)
+
+   for i in range(natoms):
+      xyz_frac[i][0]=(xyz[i][0]*mat_inv[0][0]+xyz[i][1]*mat_inv[0][1]+\
+                     xyz[i][2]*mat_inv[0][2])*sys_scale
+      xyz_frac[i][1]=(xyz[i][0]*mat_inv[1][0]+xyz[i][1]*mat_inv[1][1]+\
+                     xyz[i][2]*mat_inv[1][2])*sys_scale
+      xyz_frac[i][2]=(xyz[i][0]*mat_inv[2][0]+xyz[i][1]*mat_inv[2][1]+\
+                     xyz[i][2]*mat_inv[2][2])*sys_scale
+
+
+   return xyz_frac
+
+print("Open file 'POSCAR_insert' ...")
 insert_name="POSCAR_insert"
 
 insert_in = open(insert_name,"r")
 
+insert_cartesian=False
+solvent_cartesian=False
+
 with insert_in as infile:
    line = infile.readline()
    line = infile.readline()
-   line = infile.readline()
-   line = infile.readline()
-   line = infile.readline()
+   # read in the lattice vectors a,b and c
+
+   a_insert=np.zeros(3)
+   b_insert=np.zeros(3)
+   c_insert=np.zeros(3)
+
+   line = infile.readline().rstrip("\n")
+   a_read = line.rstrip().split()[0:3]
+   line = infile.readline().rstrip("\n")
+   b_read = line.rstrip().split()[0:3]
+   line = infile.readline().rstrip("\n")
+   c_read = line.rstrip().split()[0:3]
+   for i in range(3):
+      a_insert[i]=float(a_read[i])
+      b_insert[i]=float(b_read[i])
+      c_insert[i]=float(c_read[i])
+
    line = infile.readline()
 #   The elements line
    line = line.rstrip("\n")
@@ -82,23 +203,27 @@ with insert_in as infile:
    elem_num_insert=[]
    natoms_insert=0
    names_insert=[]
+
+
    for i in range(nelem_insert):
       elem_num_insert.append(int(line_split[i]))
       # total number of atoms in the surface
       natoms_insert=natoms_insert+elem_num_insert[i]
       for j in range(elem_num_insert[i]):
           names_insert.append(elements_insert[i])
-  
+
+
    natoms_surf=int(natoms_insert)
 
    xyz_insert = np.zeros((natoms_insert,3))
    mass_insert = np.zeros(natoms_insert)
    line = infile.readline()
    line = line.rstrip("\n")
-   print(line)
+#    Detect if direct or cartesian coordinates are used
    if line == "Direct" or line == "direct":
-      print(" Please give POSCAR_insert in cartesian coordinates!")
-      sys.exit()
+      insert_cartesian=False
+   else:
+      insert_cartesian=True
  
    for i in range(natoms_insert):
       line = infile.readline().rstrip("\n")
@@ -118,11 +243,28 @@ with insert_in as infile:
    for i in range(3):
       com[i]=com[i]/mass
 
- 
+#    If cartesian coordinates are used, transfer to direct
+xyz_insert2 = np.zeros((natoms_insert,3)) 
+if insert_cartesian:
+   xyz_insert2=trans_cart2frac(xyz_insert,natoms_insert,a_insert,b_insert,c_insert)
+else:
+   xyz_insert2=xyz_insert
+#    Move all atoms into unit cell 
+for i in range(natoms_insert):
+   for j in range(3):
+      while xyz_insert2[i][j] < 0.0:
+         xyz_insert2[i][j] = xyz_insert2[i][j] + 1.0
+      while xyz_insert2[i][j] > 1.0:
+         xyz_insert2[i][j] = xyz_insert2[i][j] - 1.0
+
+#   Convert back to cartesian coordinates
+xyz_insert=trans_frac2cart(xyz_insert2,natoms_insert,a_insert,b_insert,c_insert)
+
 #
 #    Read in the coordinates of structure B (solvent)
 #
 
+print("Open file 'POSCAR_solvent' ...")
 solvent_name="POSCAR_solvent"
 
 solvent_in = open(solvent_name,"r")
@@ -130,15 +272,29 @@ solvent_in = open(solvent_name,"r")
 with solvent_in as infile:
    line = infile.readline()
    line = infile.readline()
+
+   # read in the lattice vectors a,b and c
+
+   a_solvent=np.zeros(3)
+   b_solvent=np.zeros(3)
+   c_solvent=np.zeros(3)
+
    line = infile.readline().rstrip("\n")
-   unit_line1 = line
+   unit_line1=line.rstrip("\n")
+   a_read = line.rstrip().split()[0:3]
    line = infile.readline().rstrip("\n")
-   unit_line2 = line
+   unit_line2=line.rstrip("\n")
+   b_read = line.rstrip().split()[0:3]
    line = infile.readline().rstrip("\n")
-   unit_line3 = line
-   line = infile.readline()
+   unit_line3=line.rstrip("\n")
+   c_read = line.rstrip().split()[0:3]
+   for i in range(3):
+      a_solvent[i]=float(a_read[i])
+      b_solvent[i]=float(b_read[i])
+      c_solvent[i]=float(c_read[i])
 
 #   The elements line
+   line = infile.readline()
    line = line.rstrip("\n")
    elements_solvent = line.rstrip().split()
    nelem_solvent = len(elements_solvent)
@@ -161,8 +317,10 @@ with solvent_in as infile:
    line = line.rstrip("\n")
 
    if line == "Direct" or line == "direct":
-      print(" Please give POSCAR_solvent in cartesian coordinates!")
-      sys.exit()
+      solvent_cartesian=False
+   else:
+      solvent_cartesian=True
+   
 
    for i in range(natoms_solvent):
       line = infile.readline().rstrip("\n")
@@ -170,23 +328,27 @@ with solvent_in as infile:
       for j in range(3):
          xyz_solvent[i][j]=float(xyz_read[j])
 
+#    If cartesian coordinates are used, transfer to direct
+xyz_solvent2 = np.zeros((natoms_solvent,3))
+if solvent_cartesian:
+   xyz_solvent2=trans_cart2frac(xyz_solvent,natoms_solvent,a_solvent,b_solvent,c_solvent)
+else:
+   xyz_solvent2=xyz_solvent
+#    Move all atoms into unit cell 
+for i in range(natoms_solvent):
+   for j in range(3):
+      while xyz_solvent2[i][j] < 0.0:
+         xyz_solvent2[i][j] = xyz_solvent2[i][j] + 1.0
+      while xyz_solvent2[i][j] > 1.0:
+         xyz_solvent2[i][j] = xyz_solvent2[i][j] - 1.0
+
+#   Convert back to cartesian coordinates
+xyz_solvent=trans_frac2cart(xyz_solvent2,natoms_solvent,a_solvent,b_solvent,c_solvent)
+
+
 #
-#    Read in the desired center of mass position of the inserted structure
-#
-com_name="insert_com.dat"
-
-com_in = open(com_name,"r")
-
-com_insert = np.zeros(3)
-
-with com_in as infile:
-   line = infile.readline()
-   com_read = line.rstrip().split()
-   for i in range (3):
-      com_insert[i] = float(com_read[i])
-      
-   
 #    Shift inserted structure to desired COM
+#
 com_shift=com_insert-com
 
 for i in range(natoms_insert):
@@ -194,8 +356,7 @@ for i in range(natoms_insert):
       xyz_insert[i][j]=xyz_insert[i][j]+com_shift[j]
 
 
-print(com_shift)
-
+print("Compare solvent and insert structures, mark collisions ...")
 #
 #     Compare both structures, generate a boolean mask of deleted atoms in B
 #
@@ -203,6 +364,7 @@ print(com_shift)
 dist_mat = distance_matrix(xyz_solvent,xyz_insert,p=2)
 
 dist_mins = dist_mat.min(axis=1)
+
 
 min_mask=dist_mins < dist_remove 
 
@@ -213,6 +375,7 @@ min_mask=dist_mins < dist_remove
 #
 
 original_stdout=sys.stdout
+print("Print final POSCAR file with combined structure ...")
 with open("POSCAR","w") as f:
    sys.stdout = f
 
@@ -228,6 +391,7 @@ with open("POSCAR","w") as f:
    xyz_solv_print=np.zeros((natoms_solvent,3))
    elem_num_solv_new=[0]*nelem_solvent
    natoms_solv_new=0    
+   names_solv_print=[]
    index=0
    index2=0 
 #
@@ -240,43 +404,75 @@ with open("POSCAR","w") as f:
              xyz_solv_print[index2][0]=xyz_solvent[index][0]
              xyz_solv_print[index2][1]=xyz_solvent[index][1]
              xyz_solv_print[index2][2]=xyz_solvent[index][2]
+             names_solv_print.append(names_solvent[index])
              index2=index2+1
              elem_num_solv_new[i]=elem_num_solv_new[i]+1
              natoms_solv_new=natoms_solv_new+1
           index=index+1
 #
 #    Print the element names section
+#    Combine both sections, each element shall only appear once
 #
-   for i in range(nelem_solvent):
+
+   elements_combined=[]
+   for i in range (nelem_solvent):
       if elem_num_solv_new[i] > 0:
-         print(elements_solvent[i], end=" ")        
-   for i in range(nelem_insert):
-      print(elements_insert[i], end=" ")
+         elements_combined.append(elements_solvent[i])
+   for i in range (nelem_insert):
+      twice=False
+      for el in elements_combined:
+         if el == elements_insert[i]:
+            twice=True
+      if not twice:
+         elements_combined.append(elements_insert[i])
+
+   for el in elements_combined:
+      print(el, end=" ")
+
    print(" ")
+
+   
+
 
 #
 #    Print the element numbers section
 #
-  
-   for i in range(nelem_solvent):
-      if elem_num_solv_new[i] > 0:
-         print(elem_num_solv_new[i], end=" ")
-   for i in range(nelem_insert):
-      print(elem_num_insert[i], end=" ")
+   el_num_sum=[]
+   for i in range(len(elements_combined)):
+      el_num_sum.append(0)
+
+   for i in range(len(elements_solvent)):
+      for j in range(len(elements_combined)):
+         if elements_combined[j] == elements_solvent[i]:
+            el_num_sum[j]=el_num_sum[j]+elem_num_solv_new[i]
+
+   for i in range(len(elements_insert)):
+      for j in range(len(elements_combined)):
+         if elements_combined[j] == elements_insert[i]:
+            el_num_sum[j]=el_num_sum[j]+elem_num_insert[i]
+
+   for ind in el_num_sum:
+      print(ind, end=" ")
    print(" ")
  
    print("Cartesian")
    
-   for i in range(natoms_solv_new):
-      print(str(xyz_solv_print[i][0]) + " " + str(xyz_solv_print[i][1]) + " " + 
-           str(xyz_solv_print[i][2])) 
+   for ind in elements_combined:
+  
+      for i in range(natoms_solv_new):
+         if names_solv_print[i] == ind:
+            print(str(xyz_solv_print[i][0]) + " " + str(xyz_solv_print[i][1]) + " " + 
+                 str(xyz_solv_print[i][2])) 
 
-   for i in range(natoms_insert):
-      print(str(xyz_insert[i][0]) + " " + str(xyz_insert[i][1]) + " " + 
-           str(xyz_insert[i][2]))
+      for i in range(natoms_insert):
+         if names_insert[i] == ind:
+            print(str(xyz_insert[i][0]) + " " + str(xyz_insert[i][1]) + " " + 
+                 str(xyz_insert[i][2]))
 
+sys.stdout=original_stdout
 
-   
+print("Script struc_insert finished!")
+print(" ")  
 
 
 
