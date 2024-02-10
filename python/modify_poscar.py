@@ -505,6 +505,19 @@ if writexyz:
    if (not cartesian):
       xyz_new=trans_frac2cart(xyz_new,natoms,a_vec,b_vec,c_vec) 
 
+#  Translate it to direct coordinates and move all atoms into unit cell
+   xyz_new=trans_cart2frac(xyz_new,natoms,a_vec,b_vec,c_vec)
+   
+   for i in range(natoms):
+      for j in range(3):
+         while xyz_new[i][j] < 0.0:
+            xyz_new[i][j] = xyz_new[i][j] + 1.0
+         while xyz_new[i][j] > 1.0:
+            xyz_new[i][j] = xyz_new[i][j] - 1.0
+   
+#  Translate to cartesian coordinates for writeout
+   xyz_new=trans_frac2cart(xyz_new,natoms,a_vec,b_vec,c_vec)
+
    original_stdout=sys.stdout
    with open("poscar_mod.xyz","w") as f:
       sys.stdout = f

@@ -714,8 +714,8 @@ el_list_glob="XX"
 inc=0
 do i=1,mlab_num
    do_nelems1: do j=1,nelems_local(i)
-      do k=1,inc-1
-         if (el_list_glob(k) .eq. el_list_loc(j,i)) then
+      do k=1,inc
+         if (trim(el_list_glob(k)) .eq. trim(el_list_loc(j,i))) then
             cycle do_nelems1
          end if
       end do   
@@ -1542,7 +1542,18 @@ do i=1,nelems
                mat_overlap(k,l)=1.d0-(rdf_overlap*rdf_weight+adf_overlap*adf_weight)
             end do
          end do 
-
+!         if (basis_sizes(j) .gt. 98) then
+!         do k=1,basis_sizes(j)
+!            do l=1,k-1
+!               write(97,*) k,l,mat_overlap(k,l)
+!            end do
+!            do l=k,basis_sizes(j)
+!               write(97,*) k,l,mat_overlap(l,k)
+!            end do
+!            write(97,*)
+!         end do
+!         stop "Gupog"
+!         end if        
 
 !
 !     Perform the hierarchial clustering of the current RDF overlap matrix
