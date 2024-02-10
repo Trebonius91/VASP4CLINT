@@ -22,6 +22,7 @@ real(kind=8)::xlen,ylen,zlen
 real(kind=8)::shift_vec(3),act_val,xyz_print(3)
 integer::multiply_vec(3),pick_ind,pos_new,multiply_prod
 integer::frame_first,frame_last,line_num
+integer::read_freq
 logical::eval_stat(10)
 logical::shift_cell,multiply_cell,pick_frame,print_xyz,print_last
 character(len=120)::a120,cdum,arg
@@ -39,6 +40,9 @@ write(*,*) "    given in direct coordinates. Example: -shift=0.1,0.0,0.2"
 write(*,*) " -multiply=a,b,c : Multiply the unit cell of each frame by some"
 write(*,*) "    replications in each of the coordinate directions. Integers"
 write(*,*) "    must be given as arguments. Example: -multiply=2,2,1"
+write(*,*) " -read_freq=[number]: Only read in and process every nth frame"
+write(*,*) "    Example: -read_freq=10 : every 10th frame will be read in and "
+write(*,*) "    processed and written out. (DEFAULT: 1)"  
 write(*,*) " -pick_frame=[number] : Pick one frame of the XDATCAR file and print"
 write(*,*) "    it to a POSCAR file (POSCAR_pick). Example: -pick_frame=283"
 write(*,*) " -print_xyz : Print each frame to a xyz trajectory: xdat_mod.xyz"
@@ -84,6 +88,27 @@ do i = 1, command_argument_count()
       end if
    end if
 end do
+!
+!     Read in the read in frequency (every n'th frame will be 
+!          read in and processed)
+!
+read_freq=1
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:11))  .eq. "-read_freq=") then
+      read(arg(12:),*,iostat=readstat) read_freq
+      pick_frame=.true.
+      if (readstat .ne. 0) then
+         write(*,*)
+         stop "Check the command -read_freq=..., something went wrong!"
+         write(*,*)
+      end if
+   end if
+end do
+if (read_freq .lt. 1) then
+   write(*,*) "The read-in frequency must be at least 1!"
+   stop
+end if        
 !
 !     Pick a certain frame from the trajectory
 !
@@ -199,6 +224,13 @@ end do
 
 nframes = (xdat_lines - 7)/(natoms+1)
 !
+!    If the read frequency is larger than 1, divide the number of 
+!       frames by it!
+!
+if (read_freq .gt. 1) then
+   nframes=int(nframes/read_freq)
+end if        
+!
 !    From the print-last command, determine the first frame to be written
 !
 if (print_last) then
@@ -265,6 +297,16 @@ do i=1,nframes
          xyz(k,j,i)=act_num(k)
       end do
    end do
+!
+!     If read_freq > 1, skip the next read_freq-1 frames
+!
+   if (read_freq .gt. 1) then
+      do j=1,read_freq-1
+         do k=1,natoms+1
+            read(14,*)
+         end do
+      end do
+   end if        
 end do
 write(*,*) " completed!"
 close(14)
@@ -272,7 +314,10 @@ close(14)
 write(*,*)
 write(*,*) "---------- SETTINGS ---------------------------"
 write(*,*) "Number of atoms in the system:",natoms
-write(*,*) "Number of frames in the trajectory:",nframes
+write(*,*) "Number of frames in the trajectory:",nframes*read_freq
+if (read_freq .gt. 1) then
+   write(*,'(a,i5,a)') " Every ",read_freq,"th frame will be evaluated."
+end if        
 write(*,*) "-----------------------------------------------"
 write(*,*)
 !
