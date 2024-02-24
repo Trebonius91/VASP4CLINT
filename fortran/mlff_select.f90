@@ -59,6 +59,7 @@ integer,allocatable::inds(:,:)  ! the element indices (core charges)
 integer::ind_list_loc(50,20)   ! local list of different element indices
 integer::ind_list(50)    ! global list of different element indices
 character(len=2),allocatable::el_list_confs(:,:)  ! List of elements in all confs.
+character(len=2),allocatable::el_list_tmp(:)  ! List of elements in actual conf
 character(len=2)::el_list_loc(50,20)  ! local list of elements
 character(len=2)::el_list_glob(50)  ! global list of elements
 character(len=2)::el_list_bas(50)  ! list of elements for basis init.
@@ -95,15 +96,21 @@ real(kind=8)::rdf_weight  ! relative weight of RDF overlap
 real(kind=8)::adf_weight  ! relative weight of ADF overlap
 real(kind=8)::pi  ! the Pi
 integer,allocatable::el_nums_confs(:,:)  ! element numbers in all configurations
+integer,allocatable::el_nums_tmp(:)  ! element numbers in current conf.
 integer,allocatable::confnum_all(:)  ! numbers of configurations 
+integer,allocatable::mlab_conf(:) !  to which ML_AB file the configuration belongs
+integer,allocatable::mlab_atom(:)  ! to which ML_AB file the atom belongs
 integer,allocatable::nat_all(:) ! number of atom in configurations
 integer,allocatable::ind_all(:)  ! element indices of all atoms
+integer,allocatable::sort_map(:)  ! resorting of atoms within structure
+integer,allocatable::sort_map2(:)  ! second resorting array (inverted)
 integer,allocatable::num_around(:,:) ! number of atoms around the atom
 integer,allocatable::ind_env(:,:)  ! core charges of atoms in environments
 integer,allocatable::neigh_global(:,:)  ! list with numbers of neighbors (global)
 integer,allocatable::neigh_bas(:,:)  ! number of basis functions per environment
 integer,allocatable::grad_histo(:)   ! histogram with gradient norm ranges
 integer,allocatable::final_choice(:,:)  ! the final selection of basis functions
+integer,allocatable::trans_final(:)  ! for local reordering of final selection
 integer,allocatable::atsel_grad(:,:)  ! the atom indices of the largest gradnorms
 integer,allocatable::neighnum_global(:)  ! sum of all neighbors for all atoms
 integer,allocatable::neigh_div1(:,:),neigh_div2(:,:)  ! the neighborhood diversities
@@ -725,6 +732,7 @@ do i=1,mlab_num
 end do
 nelems_glob=inc
 
+
 at_mass_glob=0.d0
 inc=0
 do i=1,mlab_num
@@ -785,10 +793,14 @@ act_conf=0
 allocate(natoms(conf_num))
 !     The number of elements in all reference structures
 allocate(nelems_confs(conf_num))
+!     The ML_AB file index of the configuration
+allocate(mlab_conf(conf_num))
 !     The list of element symbols in all configurations
 allocate(el_list_confs(nelems_glob,conf_num))
+allocate(el_list_tmp(nelems_glob))
 !     The list of atom numbers in all configurations
 allocate(el_nums_confs(nelems_glob,conf_num))
+allocate(el_nums_tmp(nelems_glob))
 !     The geometries (cartesian coordinates)
 allocate(xyz(3,natoms_max,conf_num))
 !     The geometries (direct coordinates
@@ -836,6 +848,10 @@ do l=1,mlab_num
             read(56,*)
          end do
 !
+!     To which ML_AB file the current configuration belongs
+!
+         mlab_conf(act_conf)=l
+!
 !     The current number of atoms
 !
          read(56,*) natoms(act_conf)
@@ -843,7 +859,36 @@ do l=1,mlab_num
          read(56,*)
          read(56,*)
          do i=1,nelems_confs(act_conf)
-            read(56,*) el_list_confs(i,act_conf),el_nums_confs(i,act_conf) 
+            read(56,*) el_list_tmp(i),el_nums_tmp(i) 
+         end do
+!
+!     Sort the element list according to the global element list!
+!
+!     Further generate mapping array for resorting of falsely sorted
+!     structures
+!
+         if (allocated(sort_map)) deallocate(sort_map)
+         if (allocated(sort_map2)) deallocate(sort_map2)
+         allocate(sort_map(natoms(act_conf)))
+         allocate(sort_map2(natoms(act_conf)))
+         inc2=0
+         inc3=0
+         do i=1,nelems_glob
+            do j=1,nelems_confs(act_conf)
+               if (el_list_tmp(j) .eq. el_list_glob(i)) then
+                  inc2=inc2+1
+                  el_list_confs(inc2,act_conf)=el_list_tmp(j)
+                  el_nums_confs(inc2,act_conf)=el_nums_tmp(j)
+                  do k=1,el_nums_tmp(j)
+                     inc3=inc3+1
+                     sort_map(inc3)=sum(el_nums_tmp(1:j-1))+k
+                  end do
+                  exit    
+               end if
+            end do
+         end do
+         do i=1,natoms(act_conf)
+            sort_map2(sort_map(i))=i
          end do
 !
 !     Fill element index array
@@ -855,7 +900,7 @@ do l=1,mlab_num
                call elem(el_list_confs(i,act_conf),ind_act)
                inds(inc,act_conf)=ind_act
             end do
-         end do      
+         end do   
          read(56,*)
          read(56,*)
          read(56,*)
@@ -877,7 +922,7 @@ do l=1,mlab_num
 !     Read in the current geometry
 !
          do i=1,natoms(act_conf)
-            read(56,*) xyz(:,i,act_conf)
+            read(56,*) xyz(:,sort_map2(i),act_conf)
          end do
 !
 !     Invert the unit cell matrix and calculate the geometry 
@@ -902,7 +947,7 @@ do l=1,mlab_num
 !     Read in the current gradient
 !
          do i=1,natoms(act_conf)
-            read(56,*) grads(:,i,act_conf)
+            read(56,*) grads(:,sort_map2(i),act_conf)
          end do
          read(56,*)
          read(56,*)
@@ -939,8 +984,10 @@ nelems=nelems_glob
 natoms_sum=sum(natoms)
 !     The nelems-dimensional increment array
 allocate(incs(nelems))
-!     The configuration number of the element
+!     The configuration number of the atom
 allocate(confnum_all(natoms_sum))
+!     The ML_AB file number of the atom
+allocate(mlab_atom(natoms_sum))
 !     Boolean mask, if atom was already allocated to final basis
 allocate(atom_used(natoms_sum))
 !     The atom number in the respective configuration
@@ -1003,6 +1050,7 @@ do i=1,conf_num
       confnum_all(inc)=i
       nat_all(inc)=j
       ind_all(inc)=inds(j,i)
+      mlab_atom(inc)=mlab_conf(i)
 !
 !     Calculate the gradient norm
 !
@@ -1693,6 +1741,24 @@ do i=1,nelems
    end do
 end do
 
+
+!
+!     Reorder final atom selection to ML_AB files
+!
+do i=1,nelems
+   inc=0
+   if (allocated(trans_final)) deallocate(trans_final)
+   allocate(trans_final(nbasis(i)))
+   do j=1,mlab_num
+      do k=1,nbasis(i)
+         if (mlab_atom(final_choice(k,i)) .eq. j) then
+            inc=inc+1
+            trans_final(inc)=final_choice(k,i)
+         end if      
+      end do
+   end do
+   final_choice(:,i)=trans_final(:)
+end do
 !
 !     Finally, write out the newly generated ML_AB file!
 !
@@ -1706,17 +1772,20 @@ trans_conf=0
 inc3=0
 conf_final=0
 
-do i=1,nelems
-   do_basis: do j=1,nbasis(i)
-      inc2=confnum_all(final_choice(j,i))
-      do k=1,inc3
-         if (inc2 .eq. conf_final(k)) then
-            cycle do_basis
-         end if   
-      end do
-      inc3=inc3+1
-      conf_final(inc3)=inc2
-   end do do_basis
+do l=1,mlab_num
+   do i=1,nelems
+      do_basis: do j=1,nbasis(i)
+         if (mlab_atom(final_choice(j,i)) .ne. l) cycle do_basis
+         inc2=confnum_all(final_choice(j,i))
+         do k=1,inc3
+            if (inc2 .eq. conf_final(k)) then
+               cycle do_basis
+            end if   
+         end do
+         inc3=inc3+1
+         conf_final(inc3)=inc2
+      end do do_basis
+   end do
 end do
 nconfs_out=inc3
 !
@@ -1745,23 +1814,23 @@ do i=1,nconfs_out
 end do
 
 
-open(unit=45,file="trans_conf.dat")
-do i=1,nconfs_out
-   write(45,*) i,trans_conf(i)
-end do
-close(45)
+!open(unit=45,file="trans_conf.dat")
+!do i=1,nconfs_out
+!   write(45,*) i,trans_conf(i)
+!end do
+!close(45)
 
-open(unit=45,file="final_choice.dat")
-do i=1,nbasis(1)
-   write(45,*) i,final_choice(i,:)
-end do
-close(45)
+!open(unit=45,file="final_choice.dat")
+!do i=1,nbasis(1)
+!   write(45,*) i,final_choice(i,:)
+!end do
+!close(45)
 
-open(unit=45,file="conf_reverse.dat")
-do i=1,conf_num
-   write(45,*) i,conf_final(i)
-end do
-close(45)
+!open(unit=45,file="conf_reverse.dat")
+!do i=1,conf_num
+!   write(45,*) i,conf_final(i)
+!end do
+!close(45)
 
 !
 !     Write local environments of all chosen basis atoms to a trajectory file
