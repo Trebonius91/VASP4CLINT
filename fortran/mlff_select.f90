@@ -17,7 +17,7 @@ integer::inc_act   ! the current increment
 integer::inc_remain  ! remainder index for basis functions
 integer::mlab_num   ! number of ML_AB files to be read in
 integer,allocatable::incs(:)  ! moredimensional increment
-integer::readstat
+integer::readstat,ret
 integer::basis_mode   ! if all elements have same basis or each one enother
 integer::nbasis(50)  ! desired number of local refs. in new ML_AB
 integer::nbasis_tmp(50)  ! for resorting of nbasis array, if needed
@@ -231,8 +231,10 @@ call date_and_time(date,time,zone,values)
 call date_and_time(DATE=date,ZONE=zone)
 call date_and_time(TIME=time)
 call date_and_time(VALUES=values)
-write(34,'(a,2x,a,2x,a)') date, time, zone
-write(34,'(8i5)') values
+write(34,'(a,i2,a,i2,a,i4,a,i2,a,i2)') "    ",values(2),".",values(3),".",values(1), &
+             & ", at ",values(5),":",values(6)
+write(34,*)
+flush(34)
 !
 !     Read in names of ML_AB files that shall be processed
 !
@@ -696,6 +698,7 @@ write(34,'(a,f10.4)') " Exponential prefactor for RDF line broadening: ",alpha_r
 write(34,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
 write(34,*) "--------------------------------------------------"
 write(34,*)
+flush(34)
 
 ! ####################################################
 !     Loop over all ML_AB files given in the list and read in their content
@@ -714,6 +717,7 @@ do l=1,mlab_num
    end if
    write(*,*) "Read header of the file ",trim(mlab_list(l))," ..."
    write(34,*) "Read header of the file ",trim(mlab_list(l))," ..."
+   flush(34)
 !
 !     Read in the ML_AB file
 !
@@ -722,6 +726,7 @@ do l=1,mlab_num
    read(56,*,iostat=readstat)
    if (readstat .ne. 0) then
       write(*,*) "The file ",trim(mlab_list(l))," seems to be empty!"
+      write(34,*) "The file ",trim(mlab_list(l))," seems to be empty!"
       stop
    end if
    read(56,*)
@@ -929,6 +934,7 @@ do l=1,mlab_num
 
    write(*,*) "Read body of the file ",trim(mlab_list(l))," ..."
    write(34,*) "Read body of the file ",trim(mlab_list(l))," ..."
+   flush(34)
    do 
       read(56,'(a)',iostat=readstat) a130
       if (readstat .ne. 0) then
@@ -1072,6 +1078,7 @@ end do
 
 write(*,*) " ... done!"
 write(34,*) " ... done!"
+flush(34)
 !
 !     Setup classifier arrays for the atoms
 !     All atoms (no matter to which configuation they belong)
@@ -1139,6 +1146,7 @@ write(*,*)
 write(*,*) "Calculate classifiers for all atoms in the ML_AB file..."
 write(34,*)
 write(34,*) "Calculate classifiers for all atoms in the ML_AB file..."
+flush(34)
 
 eval_stat=.false.
 inc=0
@@ -1148,6 +1156,7 @@ do i=1,conf_num
          if (.not. eval_stat(j)) then
             write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
             write(34,'(a,i4,a)')  "  ... ",j*10,"% done "
+            flush(34)
             eval_stat(j) = .true.
          end if
       end if
@@ -1274,6 +1283,8 @@ write(*,*)
 write(*,*) " Element   No. of atoms       Basis size       atom usage (%)"
 write(34,*)
 write(34,*) " Element   No. of atoms       Basis size       atom usage (%)"
+flush(34)
+
 do i=1,nelems
    inc=0
    do j=1,natoms_sum
@@ -1286,6 +1297,7 @@ do i=1,nelems
    write(34,'(3a,i10,a,i10,a,f12.6)') "   ", el_list_glob(i)," : ",inc, "         ",nbasis(i), &
                   & "          ",real(real(nbasis(i))/real(inc)*100.d0)
 end do
+flush(34)
 write(*,*)
 write(34,*)
 !
@@ -1313,6 +1325,7 @@ close(58)
 
 write(*,*) "Select reference confs. based on largest gradient norms..."
 write(34,*) "Select reference confs. based on largest gradient norms..."
+flush(34)
 !
 !    A: GRADIENT EXTREMA PRESELECTION:
 !    Determine histogram of gradient norms for all atoms, allocate them into
@@ -1387,6 +1400,7 @@ write(*,*) " ... done!"
 write(*,*) "Sort the configs. according to the number of their neighbors..."
 write(34,*) " ... done!"
 write(34,*) "Sort the configs. according to the number of their neighbors..."
+flush(34)
 !    
 !    B: THE LOCAL NEIGHBORS: number and diversity, minimum number!
 !
@@ -1408,6 +1422,7 @@ write(*,*) " ... done!"
 write(*,*) "Fill diversity-dependent minimum conf. numbers to neighbor bins..."
 write(34,*) " ... done!"
 write(34,*) "Fill diversity-dependent minimum conf. numbers to neighbor bins..."
+flush(34)
 !
 !    Fill diversity-dependent minimum number of allocated basis functions
 !      into different neighbor bins (each bin one, until full or all atoms
@@ -1442,6 +1457,7 @@ do_elems: do i=1,nelems
 end do do_elems
 write(*,*) " ... done!"
 write(34,*) " ... done!"
+flush(34)
 !
 !    Write distribution of neighbor numbers to file
 !
@@ -1472,7 +1488,7 @@ write(34,*)
 write(34,*) "Select remaining basis functions via hierarchial cluster analysis"
 write(34,*) " of neighborhood-diversity specific atom classes, based on RDF "
 write(34,*) " and ADF overlap matrices."
-
+flush(34)
 !    
 !     C: THE LOCAL NEIGHBORS: number and diversity, final allocation via 
 !      hierarchial cluster analysis!
@@ -1483,6 +1499,7 @@ do i=1,nelems
    write(*,*) "Cluster all ",el_list_glob(i)," atoms ..."
    write(34,*)
    write(34,*) "Cluster all ",el_list_glob(i)," atoms ..."
+   flush(34)
 !
 !     Number of available basis functions:
 !
@@ -1689,6 +1706,7 @@ do i=1,nelems
                   write(*,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
                   write(34,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
                end if         
+               flush(34)
             end if
          end if     
                     
@@ -1869,7 +1887,7 @@ write(*,*) "Prepare final writeout of selected configurations..."
 write(34,*) " ... done!"
 write(34,*)
 write(34,*) "Prepare final writeout of selected configurations..."
-
+flush(34)
 
 do i=1,nelems
    do j=1,nbasis(i)
@@ -1991,7 +2009,7 @@ write(*,*)
 write(34,*)
 write(34,*) "File 'environments.xyz' with local environments of basis functions written."
 write(34,*)
-
+flush(34)
 
 !
 !    First write the header of the new ML_AB file
