@@ -126,6 +126,11 @@ integer,allocatable::confbas_final(:,:)  ! the final list of confs. for each bas
 integer::mat_coord(2)  ! the current matrix indices
 logical::eval_stat(10)  ! the progress for evaluation loops
 logical,allocatable::atom_used(:)  ! boolean mask for blocking of treated atoms
+!   for time measurement
+character(8)  :: date
+character(10) :: time
+character(5)  :: zone
+integer,dimension(8) :: values
 !   for Lapack call (matrix diagonalization)
 character(len=1)::JOBZ,UPLO
 integer::Nn,LDA,LDU,LDV,LWORK,INFO
@@ -218,6 +223,17 @@ end do
 
 call cpu_time(time1)
 !
+!     Open logfile for alternative printout to file 
+!
+open(unit=34,file="mlff_select.log",status="replace")
+write(34,*) "Program mlff_select, execution started at:"
+call date_and_time(date,time,zone,values)
+call date_and_time(DATE=date,ZONE=zone)
+call date_and_time(TIME=time)
+call date_and_time(VALUES=values)
+write(34,'(a,2x,a,2x,a)') date, time, zone
+write(34,'(8i5)') values
+!
 !     Read in names of ML_AB files that shall be processed
 !
 mlab_num=0
@@ -243,6 +259,9 @@ if (mlab_num .lt. 1) then
    write(*,*) "Please give at least one ML_AB filename that can be read in!"
    write(*,*) "The format is -ml_ab=[file1],[file2], ... (up to 20 files possible)"
    write(*,*)
+   write(34,*) "Please give at least one ML_AB filename that can be read in!"
+   write(34,*) "The format is -ml_ab=[file1],[file2], ... (up to 20 files possible)"
+   write(34,*)
    stop
 end if
 
@@ -262,6 +281,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -nbasis=[number] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -nbasis=[number] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
       nbasis=inc
@@ -301,6 +322,10 @@ if (sum(nbasis) .lt. 1) then
    write(*,*) " with the keyword -nbasis=[number] or -nbasis_el=[el1:number1],[el2:number2],..."
    write(*,*) "Recommended are values between 2000 and 8000"
    write(*,*)
+   write(34,*) "Please give the number of local reference configurations after selection"
+   write(34,*) " with the keyword -nbasis=[number] or -nbasis_el=[el1:number1],[el2:number2],..."
+   write(34,*) "Recommended are values between 2000 and 8000"
+   write(34,*)
    stop
 end if
 
@@ -318,6 +343,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -cutoff=[value] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -cutoff=[value] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -325,6 +352,8 @@ end do
 if (cutoff .lt. 0.0d0) then
    write(*,*) "Please give a reasonable value for the radial and angular cutoffs "
    write(*,*) " used during the learning (or shall be used during selection)"
+   write(34,*) "Please give a reasonable value for the radial and angular cutoffs "
+   write(34,*) " used during the learning (or shall be used during selection)"
    stop
 end if
 
@@ -339,6 +368,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -grad_frac=[value] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -grad_frac=[value] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -348,6 +379,10 @@ if (grad_frac .lt. 0.0 .or. grad_frac .gt. 1.0) then
    write(*,*) " gradient norm atoms with the keyword -grad_frac=[value]"
    write(*,*) " where the maximum fraction is 1.0 (all) and the minimum is 0.0 (none)"
    write(*,*)
+   write(34,*) "Please give the desired fraction of basis functions for the largest "
+   write(34,*) " gradient norm atoms with the keyword -grad_frac=[value]"
+   write(34,*) " where the maximum fraction is 1.0 (all) and the minimum is 0.0 (none)"
+   write(34,*)
    stop
 end if
 
@@ -362,6 +397,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -train_div=[value] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -train_div=[value] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -370,6 +407,9 @@ if (train_div .lt. 0.0 .or. train_div .gt. 1.0) then
    write(*,*) "Please give the desired trainset diversity with the keyword -train_div=[value]"
    write(*,*) " where the maximum diversity is 1.0 and the minimum is 0.0"
    write(*,*)
+   write(34,*) "Please give the desired trainset diversity with the keyword -train_div=[value]"
+   write(34,*) " where the maximum diversity is 1.0 and the minimum is 0.0"
+   write(34,*)
    stop
 end if
 !
@@ -384,6 +424,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -rdf2adf=[value] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -rdf2adf=[value] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -391,6 +433,8 @@ end do
 if (rdf_adf .lt. 0.0 ) then
    write(*,*) "Please give a value between zero and infinity for the -rdf2adf command!"
    write(*,*)
+   write(34,*) "Please give a value between zero and infinity for the -rdf2adf command!"
+   write(34,*)
    stop
 end if
 rdf_weight=rdf_adf/(rdf_adf+1.d0)
@@ -407,6 +451,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -neigh_classes=[number] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -neigh_classes=[number] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -416,6 +462,10 @@ if (neigh_classes .lt. 1) then
    write(*,*) " diversities with the keyword -neigh_classes=[number], where the number"
    write(*,*) " of classes must be 1 (no subdividing) or larger."
    write(*,*)
+   write(34,*) "Please give the number of neighborhood classes based on their element "
+   write(34,*) " diversities with the keyword -neigh_classes=[number], where the number"
+   write(34,*) " of classes must be 1 (no subdividing) or larger."
+   write(34,*)
    stop
 end if
 
@@ -431,6 +481,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -bas_scale=(linear or root) command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -bas_scale=(linear or root) command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -441,6 +493,11 @@ if ((bas_scale .ne. "linear") .and. (bas_scale .ne. "root")) then
    write(*,*) " Linear scaling: -bas_scale=linear"
    write(*,*) " Square root scaling: -bas_scale=root"
    write(*,*)
+   write(34,*) "Please decide if the number of basis functions per neighborhood class shall "
+   write(34,*) " scale linearly or square root wise with the number of contained atoms."
+   write(34,*) " Linear scaling: -bas_scale=linear"
+   write(34,*) " Square root scaling: -bas_scale=root"
+   write(34,*)
    stop
 end if
 
@@ -455,6 +512,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -max_environ=(number) command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -max_environ=(number) command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -463,6 +522,9 @@ if (max_environ .le. 1) then
    write(*,*) "Please give a number for the maximum number of atoms within the cutoff "
    write(*,*) "  radius of any other atom! (default: 500)"
    write(*,*)
+   write(34,*) "Please give a number for the maximum number of atoms within the cutoff "
+   write(34,*) "  radius of any other atom! (default: 500)"
+   write(34,*)
    stop
 end if
 
@@ -478,6 +540,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -s_grid=(number) command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -s_grid=(number) command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -486,6 +550,9 @@ if (ngrid .le. 1) then
    write(*,*) "Please give a reasonable value for the number of RDF/ADF integration "
    write(*,*) " grid points! (default: 200)."   
    write(*,*)
+   write(34,*) "Please give a reasonable value for the number of RDF/ADF integration "
+   write(34,*) " grid points! (default: 200)."
+   write(34,*)
    stop
 end if
 
@@ -500,6 +567,9 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -rdf_exp=[number] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -rdf_exp=[number] command seems to be corrupted!"
+         write(34,*)
+
          stop
       end if
    end if
@@ -508,6 +578,9 @@ if (alpha_r .lt. 0.0001d0) then
    write(*,*) "Please give the preexponential factor of the Gaussian used to broaden"
    write(*,*) " the RDF profiles of all atoms."
    write(*,*)
+   write(34,*) "Please give the preexponential factor of the Gaussian used to broaden"
+   write(34,*) " the RDF profiles of all atoms."
+   write(34,*)
    stop
 end if
 !
@@ -521,6 +594,8 @@ do i = 1, command_argument_count()
       if (readstat .ne. 0) then
          write(*,*) "The format of the -adf_exp=[number] command seems to be corrupted!"
          write(*,*)
+         write(34,*) "The format of the -adf_exp=[number] command seems to be corrupted!"
+         write(34,*)
          stop
       end if
    end if
@@ -529,6 +604,9 @@ if (alpha_a .lt. 0.0001d0) then
    write(*,*) "Please give the preexponential factor of the Gaussian used to broaden"
    write(*,*) " the ADF profiles of all atoms."
    write(*,*)
+   write(34,*) "Please give the preexponential factor of the Gaussian used to broaden"
+   write(34,*) " the ADF profiles of all atoms."
+   write(34,*)
    stop
 end if
 
@@ -560,21 +638,28 @@ da=180.d0/real(ngrid)
 !
 write(*,*) "------------- CALCULATION SETTINGS ---------------"
 write(*,*) "List of ML_AB files to be read in:"
+write(34,*) "------------- CALCULATION SETTINGS ---------------"
+write(34,*) "List of ML_AB files to be read in:"
 do i=1,mlab_num
    if (i .lt. 10) then
       write(*,'(a,i1,a,a)',advance="no") "   (",i,") ",trim(mlab_list(i))
+      write(34,'(a,i1,a,a)',advance="no") "   (",i,") ",trim(mlab_list(i))
    else 
       write(*,'(a,i2,a,a)',advance="no") " (",i,") ",trim(mlab_list(i))
+      write(34,'(a,i2,a,a)',advance="no") " (",i,") ",trim(mlab_list(i))
    end if        
 end do
 write(*,*)
 if (basis_mode .eq. 1) then
-   write(*,*) "Number of basis functions for all elements: ",nbasis(1) 
+   write(*,*) "Number of basis functions for all elements: ",nbasis(1)
+   write(34,*) "Number of basis functions for all elements: ",nbasis(1) 
 else if (basis_mode .eq. 2) then
    write(*,*) "Number of basis functions for each element, separately:"
+   write(34,*) "Number of basis functions for each element, separately:"
    do i=1,50
       if (el_list_bas(i) .eq. "XX") exit
       write(*,'(a,a,a,i8)') "  * ",el_list_bas(i),":  ",nbasis(i)
+      write(34,'(a,a,a,i8)') "  * ",el_list_bas(i),":  ",nbasis(i)
    end do
 end if
 write(*,'(a,f10.4,a)') " The ML_FF descriptor cutoff is ",cutoff," Angstrom."
@@ -584,10 +669,20 @@ write(*,'(a,f8.3,a,f8.3,a)') " Weighting of overlap matrices: ",rdf_weight*100d0
                    & " % RDF, ",adf_weight*100d0," % ADF."
 write(*,'(a,i5)') " Number of neighborhood classes per environment & 
                &size:",neigh_classes 
+write(34,'(a,f10.4,a)') " The ML_FF descriptor cutoff is ",cutoff," Angstrom."
+write(34,'(a,f10.4,a)') " ",grad_frac*100d0," % of basis functions allocated for large gradients."
+write(34,'(a,f10.4,a)') " ",train_div*100d0," % of basis functions allocated uniformly."
+write(34,'(a,f8.3,a,f8.3,a)') " Weighting of overlap matrices: ",rdf_weight*100d0, &
+                   & " % RDF, ",adf_weight*100d0," % ADF."
+write(34,'(a,i5)') " Number of neighborhood classes per environment & 
+               &size:",neigh_classes
+
 if (bas_scale .eq. "linear") then
    write(*,*) "Number of basis functions per neighborhood class scaled linearly."
+   write(34,*) "Number of basis functions per neighborhood class scaled linearly."
 else if (bas_scale .eq. "root") then     
    write(*,*) "Number of basis functions per neighborhood class scaled with square root."
+   write(34,*) "Number of basis functions per neighborhood class scaled with square root."
 end if
 write(*,'(a,i6)') " Maximum number of atoms within the cutoff of any atom: ",max_environ
 write(*,'(a,i8)') " Number of grid points for RDF/ADF overlap integrations: ",ngrid
@@ -595,6 +690,12 @@ write(*,'(a,f10.4)') " Exponential prefactor for RDF line broadening: ",alpha_r
 write(*,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
 write(*,*) "--------------------------------------------------"
 write(*,*)
+write(34,'(a,i6)') " Maximum number of atoms within the cutoff of any atom: ",max_environ
+write(34,'(a,i8)') " Number of grid points for RDF/ADF overlap integrations: ",ngrid
+write(34,'(a,f10.4)') " Exponential prefactor for RDF line broadening: ",alpha_r
+write(34,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
+write(34,*) "--------------------------------------------------"
+write(34,*)
 
 ! ####################################################
 !     Loop over all ML_AB files given in the list and read in their content
@@ -612,6 +713,7 @@ do l=1,mlab_num
       stop
    end if
    write(*,*) "Read header of the file ",trim(mlab_list(l))," ..."
+   write(34,*) "Read header of the file ",trim(mlab_list(l))," ..."
 !
 !     Read in the ML_AB file
 !
@@ -826,7 +928,7 @@ do l=1,mlab_num
    open(unit=56,file=mlab_list(l),status="old")
 
    write(*,*) "Read body of the file ",trim(mlab_list(l))," ..."
-
+   write(34,*) "Read body of the file ",trim(mlab_list(l))," ..."
    do 
       read(56,'(a)',iostat=readstat) a130
       if (readstat .ne. 0) then
@@ -969,6 +1071,7 @@ end do
 
 
 write(*,*) " ... done!"
+write(34,*) " ... done!"
 !
 !     Setup classifier arrays for the atoms
 !     All atoms (no matter to which configuation they belong)
@@ -1030,9 +1133,13 @@ num_around=0
 rdf_all=0.d0
 adf_all=0.d0
 write(*,*) "Total number of atoms (possible basis functions):",natoms_sum
+write(34,*) "Total number of atoms (possible basis functions):",natoms_sum
 
 write(*,*)
 write(*,*) "Calculate classifiers for all atoms in the ML_AB file..."
+write(34,*)
+write(34,*) "Calculate classifiers for all atoms in the ML_AB file..."
+
 eval_stat=.false.
 inc=0
 do i=1,conf_num
@@ -1040,6 +1147,7 @@ do i=1,conf_num
       if (real(i)/real(conf_num) .gt. real(j)*0.1d0) then
          if (.not. eval_stat(j)) then
             write(*,'(a,i4,a)')  "  ... ",j*10,"% done "
+            write(34,'(a,i4,a)')  "  ... ",j*10,"% done "
             eval_stat(j) = .true.
          end if
       end if
@@ -1160,9 +1268,12 @@ do i=1,conf_num
    end do
 end do
 write(*,*) " ... finished!"
+write(34,*) " ... finished!"
 
 write(*,*)
 write(*,*) " Element   No. of atoms       Basis size       atom usage (%)"
+write(34,*)
+write(34,*) " Element   No. of atoms       Basis size       atom usage (%)"
 do i=1,nelems
    inc=0
    do j=1,natoms_sum
@@ -1172,9 +1283,11 @@ do i=1,nelems
    end do
    write(*,'(3a,i10,a,i10,a,f12.6)') "   ", el_list_glob(i)," : ",inc, "         ",nbasis(i), &
                   & "          ",real(real(nbasis(i))/real(inc)*100.d0)
+   write(34,'(3a,i10,a,i10,a,f12.6)') "   ", el_list_glob(i)," : ",inc, "         ",nbasis(i), &
+                  & "          ",real(real(nbasis(i))/real(inc)*100.d0)
 end do
 write(*,*)
-
+write(34,*)
 !
 !     All atoms are still available
 !
@@ -1199,6 +1312,7 @@ end do
 close(58)
 
 write(*,*) "Select reference confs. based on largest gradient norms..."
+write(34,*) "Select reference confs. based on largest gradient norms..."
 !
 !    A: GRADIENT EXTREMA PRESELECTION:
 !    Determine histogram of gradient norms for all atoms, allocate them into
@@ -1271,6 +1385,8 @@ end do
 
 write(*,*) " ... done!"
 write(*,*) "Sort the configs. according to the number of their neighbors..."
+write(34,*) " ... done!"
+write(34,*) "Sort the configs. according to the number of their neighbors..."
 !    
 !    B: THE LOCAL NEIGHBORS: number and diversity, minimum number!
 !
@@ -1290,6 +1406,8 @@ end do
 
 write(*,*) " ... done!"
 write(*,*) "Fill diversity-dependent minimum conf. numbers to neighbor bins..."
+write(34,*) " ... done!"
+write(34,*) "Fill diversity-dependent minimum conf. numbers to neighbor bins..."
 !
 !    Fill diversity-dependent minimum number of allocated basis functions
 !      into different neighbor bins (each bin one, until full or all atoms
@@ -1323,7 +1441,7 @@ do_elems: do i=1,nelems
    end do do_column
 end do do_elems
 write(*,*) " ... done!"
-
+write(34,*) " ... done!"
 !
 !    Write distribution of neighbor numbers to file
 !
@@ -1349,6 +1467,11 @@ write(*,*)
 write(*,*) "Select remaining basis functions via hierarchial cluster analysis"
 write(*,*) " of neighborhood-diversity specific atom classes, based on RDF "
 write(*,*) " and ADF overlap matrices."
+write(34,*) "File 'neighbor_nums.dat' with neighbor number histograms written..."
+write(34,*)
+write(34,*) "Select remaining basis functions via hierarchial cluster analysis"
+write(34,*) " of neighborhood-diversity specific atom classes, based on RDF "
+write(34,*) " and ADF overlap matrices."
 
 !    
 !     C: THE LOCAL NEIGHBORS: number and diversity, final allocation via 
@@ -1358,6 +1481,8 @@ write(*,*) " and ADF overlap matrices."
 do i=1,nelems
    write(*,*)
    write(*,*) "Cluster all ",el_list_glob(i)," atoms ..."
+   write(34,*)
+   write(34,*) "Cluster all ",el_list_glob(i)," atoms ..."
 !
 !     Number of available basis functions:
 !
@@ -1557,11 +1682,13 @@ do i=1,nelems
       if (k_number(j) .gt. 0) then
          if (j .gt. 1) then
             if (bas_neighs(j) .ne. bas_neighs(j-1)) then
-                if (j .eq. size(basis_sizes)) then
-                   write(*,*) " Cluster the remaining atoms ..."
-                else
-                   write(*,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
-                end if         
+               if (j .eq. size(basis_sizes)) then
+                  write(*,*) " Cluster the remaining atoms ..."
+                  write(34,*) " Cluster the remaining atoms ..."
+               else
+                  write(*,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
+                  write(34,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
+               end if         
             end if
          end if     
                     
@@ -1708,6 +1835,11 @@ do i=1,nelems
             write(*,'(a,i7,a,i7,a)') " spot! (current:",k_number(j),", allowed:",basis_sizes(j)," )"
             write(*,*) "Please reduce the number of neigh_classes (globally) or the "
             write(*,*) "  number of basis functions for ",el_list_glob(i),"!"
+            write(34,*) "For one neighborhood class, the number of basis functions to "
+            write(34,*) " be allocated is larger than the total number of atoms in this"
+            write(34,'(a,i7,a,i7,a)') " spot! (current:",k_number(j),", allowed:",basis_sizes(j)," )"
+            write(34,*) "Please reduce the number of neigh_classes (globally) or the "
+            write(34,*) "  number of basis functions for ",el_list_glob(i),"!"
             stop 
          end if        
          atom_list: do k=2,basis_sizes(j)
@@ -1734,6 +1866,10 @@ end do
 write(*,*) " ... done!"
 write(*,*) 
 write(*,*) "Prepare final writeout of selected configurations..."
+write(34,*) " ... done!"
+write(34,*)
+write(34,*) "Prepare final writeout of selected configurations..."
+
 
 do i=1,nelems
    do j=1,nbasis(i)
@@ -1852,6 +1988,9 @@ close(56)
 write(*,*)
 write(*,*) "File 'environments.xyz' with local environments of basis functions written."
 write(*,*)
+write(34,*)
+write(34,*) "File 'environments.xyz' with local environments of basis functions written."
+write(34,*)
 
 
 !
@@ -2026,7 +2165,15 @@ write(*,*)
 write(*,'(a,f12.4,a)') " Total execution time: ",time2-time1," seconds"
 write(*,*) "mlff_select finished normally."
 write(*,*)
-
+write(34,*) "New ML_AB file written to file 'ML_AB_sel'."
+write(34,*)
+write(34,'(a,f12.4,a)') " Total execution time: ",time2-time1," seconds"
+write(34,*) "mlff_select finished normally."
+write(34,*)
+!
+!     Close logfile for alternative output to file
+!
+close(34)
 
 end program mlff_select
 
