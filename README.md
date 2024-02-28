@@ -1,8 +1,9 @@
 # VASP4CLINT
 **Utility scripts and programs for VASP calculations of (liquid or solid) interface systems**
 
-by Julien Steffen, julien.steffen@fau.de
-   Andreas Mölkner, andreas.moelkner@fau.de
+by
+Julien Steffen, julien.steffen@fau.de
+Andreas Mölkner, andreas.moelkner@fau.de
 
 ## General overview
 
