@@ -10,21 +10,26 @@ implicit none
 integer::i,j,k 
 real(kind=8)::coord_scale
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
+real(kind=8)::a_vec_new(3),b_vec_new(3)
 character(len=2)::el_name
 integer::natoms,natoms_chosen
 integer::ind1,ind2,ind3,ind4
 character(len=1),allocatable::active(:,:)
 real(kind=8),allocatable::xyz_ref(:,:)
 real(kind=8)::pos1(2),pos2(2),pos3(2),pos4(2)
-real(kind=8)::vec1(2),vec2(2),origin(2)
+real(kind=8)::vec1(2),vec2(2),origin(3)
 real(kind=8)::vec_final(2,2),pos_act(2)
 integer::vec_inds(6,2)
+integer::readstat
 real(kind=8)::angle,arg
 real(kind=8)::pi
+real(kind=8)::lambda,mu
+real(kind=8)::x_vec(2)
+real(kind=8)::unit_mat(2,2),inv_mat(2,2)
 real(kind=8)::par_x,par_y,x_act,y_act
 real(kind=8)::x_check,y_check,dist
-real(kind=8)::xyz_chosen(1000,3)
-character(len=1)::active_chosen(1000,3)
+real(kind=8)::xyz_chosen(10000,3)
+character(len=1)::active_chosen(10000,3)
 
 pi=3.14159265359d0
 
@@ -41,7 +46,11 @@ write(*,*) " vector2=atom3-atom1"
 !     First, read in the given POSCAR of the large surface
 !
 
-open(unit=16,file="POSCAR_surf",status="old")
+open(unit=16,file="POSCAR_surf",status="old",iostat=readstat)
+if (readstat .ne. 0) then
+   write(*,*) "The file 'POSCAR_surf' could not been found!"
+   stop
+end if       
 read(16,*)
 read(16,*) coord_scale
 read(16,*) a_vec(:)
@@ -63,7 +72,11 @@ close(16)
 !     Second, read indices of chosen atoms from file atom_inds.txt
 !
 
-open(unit=17,file="atom_inds.txt",status="old")
+open(unit=17,file="atom_inds.txt",status="old",iostat=readstat)
+if (readstat .ne. 0) then
+   write(*,*) "The file 'atom_inds.txt' could not been found!"
+   stop
+end if        
 read(17,*) ind1
 read(17,*) ind2
 read(17,*) ind3
@@ -88,56 +101,63 @@ pos3=xyz_ref(ind3,1:2)
 vec1=pos2-pos1
 vec2=pos3-pos1
 
-origin=pos1
+origin(1:2)=pos1
+origin(3)=0.d0
 
 write(*,*) "Unit cell vector 1: ", vec1
 write(*,*) "Unit cell vector 2: ", vec2
-write(*,*) "origin",origin
+write(*,*) "origin",origin(1:2)
 !
 !     Determine all atoms that are in the defined unit cell
 !     Solve linear system of equations for each atom in the system
 !     Subtract position of atom 1 in the unit cell to shift them to the 
 !     right position
 !
+!
+!     Calculate inverse matrix of coordinate vectors
+!
+unit_mat(:,1)=vec1
+unit_mat(:,2)=vec2
+
+call matinv2(unit_mat,inv_mat)
 natoms_chosen=0
 outer: do i=1,natoms
-   x_act=xyz_ref(i,1)
-   y_act=xyz_ref(i,2)
-   par_x=(x_act*vec2(2)-vec2(1)*y_act)/(vec1(1)*vec2(2)-vec2(1)*vec1(2))
-   par_y=(y_act*vec1(1)-vec1(2)*x_act)/(vec1(1)*vec2(2)-vec2(1)*vec1(2))
-   if ((par_x .ge. 0.d0) .and. (par_x .lt. 1.d0) .and. (par_y .ge. 0.d0) &
-              &  .and. (par_y .lt. 1.d0)) then
-!
-!     Check if another atom within the cell would be (nearly) reproced by
-!     shifting the new atom with the unit cell vectors
-!
-!      x_check=x_act+vec1(1)
-!      y_check=y_act+vec1(2)
-!      inner1: do j=1,natoms_chosen
-!         dist=sqrt((x_check-xyz_chosen(j,1))**+(y_check-xyz_chosen(j,2))**2)
-!         if (dist .lt. 1E-6) cycle outer
-!      end do inner1
-!      x_check=x_act-vec1(1)
-!      y_check=y_act-vec1(2)
-!      inner2: do j=1,natoms_chosen
-!         dist=sqrt((x_check-xyz_chosen(j,1))**+(y_check-xyz_chosen(j,2))**2)
-!         if (dist .lt. 1E-6) cycle outer
-!      end do inner2
-!      x_check=x_act+vec2(1)
-!      y_check=y_act+vec2(2)
-!      inner3: do j=1,natoms_chosen
-!         dist=sqrt((x_check-xyz_chosen(j,1))**+(y_check-xyz_chosen(j,2))**2)
-!         if (dist .lt. 1E-6) cycle outer
-!      end do inner3
-!      x_check=x_act-vec2(1)
-!      y_check=y_act-vec2(2)
-!      inner4: do j=1,natoms_chosen
-!         dist=sqrt((x_check-xyz_chosen(j,1))**+(y_check-xyz_chosen(j,2))**2)
-!         if (dist .lt. 1E-6) cycle outer
-!      end do inner4
-!
+   
+   x_vec=matmul(inv_mat,xyz_ref(i,1:2)-origin(1:2))   
+
+!   x_act=xyz_ref(i,1)
+!   y_act=xyz_ref(i,2)
+!   x_act=x_act-origin(1)
+!   y_act=y_act-origin(2)
+
+!   lambda=x_act/vec1(1)-((y_act*vec1(1)-x_act*vec1(2))/(vec1(1)*vec2(2)-&
+!               &vec1(2)*vec2(1)))*(vec2(1)/vec1(1))
+!   lambda=(vec1(1)*y_act-vec1(2)*x_act)/(vec2(2)*vec1(1)-vec2(1)*vec1(2))
+!   mu=(y_act*vec1(1)-x_act*vec1(2))/(vec2(2)*vec1(1)-vec2(1)*vec1(2))
+
+!   if (x_vec(1)+x_vec(2) .lt. 1.0d0 .and. x_vec(1)+x_vec(2) .gt. 0.0d0) then
+   do while(x_vec(1) .lt. 1d-8) 
+      x_vec(1)=x_vec(1)+1.d0
+   end do
+   do while(x_vec(2) .lt. 1d-8) 
+      x_vec(2)=x_vec(2)+1.d0
+   end do
+      
+
+   if ((x_vec(1) .ge. 0.d0) .and. (x_vec(1) .lt. 1.0001d0) .and. (x_vec(2) .ge. 0.d0) &
+              &  .and. (x_vec(2) .lt. 1.0001d0)) then
       natoms_chosen=natoms_chosen+1
-      xyz_chosen(natoms_chosen,:)=xyz_ref(i,:)
+     ! xyz_chosen(natoms_chosen,:)=xyz_ref(i,:)-origin(:)
+      do j=1,natoms_chosen-1
+         dist=sqrt((xyz_chosen(j,1)-x_vec(1))**2+(xyz_chosen(j,2)-x_vec(2))**2) 
+         if (dist .lt. 0.0001d0) then
+            natoms_chosen=natoms_chosen-1
+            cycle outer
+         end if
+      end do
+      xyz_chosen(natoms_chosen,1)=x_vec(1)
+      xyz_chosen(natoms_chosen,2)=x_vec(2)
+      xyz_chosen(natoms_chosen,3)=xyz_ref(i,3)/c_vec(3)
       active_chosen(natoms_chosen,:)=active(i,:)
    end if
 end do outer
@@ -147,6 +167,10 @@ end do outer
 open(unit=27,file="POSCAR",status="replace")
 write(27,*) "New unit cell, build by cut_unitcell.f90"
 write(27,*) coord_scale
+a_vec_new(1:2)=vec1
+a_vec_new(3)=0
+b_vec_new(1:2)=vec2
+b_vec_new(3)=0
 write(27,*) vec1(1),vec1(2),0.d0
 write(27,*) vec2(1),vec2(2),0.d0
 write(27,*) 0.d0,0.d0,c_vec(3)
@@ -155,8 +179,10 @@ write(27,*) natoms_chosen
 write(27,*) "Selective "
 write(27,*) "Cartesian "
 do i=1,natoms_chosen
-   write(27,*) xyz_chosen(i,:),active_chosen(i,1), "  ",active_chosen(i,2),&
-                & "   ",active_chosen(i,3)
+   write(27,*) xyz_chosen(i,1)*a_vec_new(1)+xyz_chosen(i,2)*b_vec_new(1)+&
+      &      xyz_chosen(i,3)*c_vec(1),xyz_chosen(i,1)*a_vec_new(2)+xyz_chosen(i,2)*b_vec_new(2)+&
+      &      xyz_chosen(i,3)*c_vec(2),xyz_chosen(i,1)*a_vec_new(3)+xyz_chosen(i,2)*b_vec_new(3)+&
+      &      xyz_chosen(i,3)*c_vec(3)
 end do
 
 
@@ -164,3 +190,28 @@ close(27)
 
 
 end program cut_unitcell
+
+!
+!    Taken from: https://fortranwiki.org/fortran/show/Matrix+inversion
+!
+subroutine matinv2(A,B)
+  !! Performs a direct calculation of the inverse of a 2×2 matrix.
+  real(kind=8), intent(in) :: A(2,2)   !! Matrix
+  real(kind=8), intent(out) :: B(2,2)   !! Inverse matrix
+  real(kind=8)             :: detinv
+
+  ! Calculate the inverse determinant of the matrix
+  detinv = 1/(A(1,1)*A(2,2) - A(1,2)*A(2,1))
+  if (abs(detinv) .lt. 1E-8) then
+     write(*,*) "Error! The determinant of the coordinate matrix is almost zero!"
+     write(*,*) " Please do not choose two parallel unit vectors!"
+     stop
+  end if        
+
+  ! Calculate the inverse of the matrix
+  B(1,1) = +detinv * A(2,2)
+  B(2,1) = -detinv * A(2,1)
+  B(1,2) = -detinv * A(1,2)
+  B(2,2) = +detinv * A(1,1)
+  return
+end subroutine matinv2
