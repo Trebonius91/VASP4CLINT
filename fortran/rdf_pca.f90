@@ -29,12 +29,16 @@ real(kind=8),allocatable::weights(:),deriv(:)
 real(kind=8),allocatable::weights_best(:)
 real(kind=8),allocatable::x_vals(:)
 real(kind=8)::err_sum,sum1
-real(kind=8)::err_sum_best
+real(kind=8)::err_sum_best,err_sum_best2
 real(kind=8),allocatable::fvec(:),rdf_approx(:)
 real(kind=8),allocatable::fvec_best(:)
 real(kind=8),allocatable::rdf_weight(:,:)
 real(kind=8)::tol
+real(kind=8)::err_best(1)
+real(kind=8),allocatable::weigh_best(:,:)
 integer::iwa,lwa,info
+integer::iind,jind,p
+integer::msls_starts
 real(kind=8),allocatable::wa(:)
 integer::ref_num,ref_num_old
 external::error_function
@@ -52,12 +56,15 @@ write(*,*) "All RDFs must have the same x-axis and the same No. of points"
 write(*,*) "Filenames need to be given by the following keywords:"
 write(*,*) " -rdf_file=[filename] : The analyzed RDF profile"
 write(*,*) " -ref1=[filename1] -rdf2=[filename2] ... : The reference RDFs"
+write(*,*) "Further, the number of multi start local search (MSLS) starts "
+write(*,*) " can be given (default value: 100): -msls_starts=[number]"
 write(*,*) 
+
 
 !
 !    Default number of starts for the multistart local search
 !
-nstarts=100
+msls_starts=100
 !
 !    Read in and process the command line arguments
 !
@@ -109,6 +116,14 @@ do i=1,99
    if (.not. ref_read(i)) exit
 end do
 
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:13))  .eq. "-msls_starts=") then
+      read(arg(14:),*,iostat=readstat) msls_starts
+   end if
+end do
+
+
 if (ref_num .lt. 2) then
    write(*,*) "Please give at last two reference RDF profiles!"
    stop
@@ -136,7 +151,8 @@ do
 end do
 close(34)
 
-write(*,*)  " - Number of plot points in RDFs: ",nlines
+write(*,'(a,i10)')  "  - Number of starts in the MSLS algorithm: ",msls_starts
+write(*,'(a,i10)')  "  - Number of plot points in RDFs: ",nlines
 write(*,*)
 
 allocate(x_vals(nlines))
@@ -177,14 +193,17 @@ allocate(fvec_best(nlines))
 allocate(weights_best(ref_num))
 allocate(rdf_approx(nlines))
 allocate(rdf_weight(nlines,ref_num))
+allocate(weigh_best(ref_num,1))
 iwa=ref_num
 lwa=nlines*ref_num+5*ref_num+nlines+1000
 allocate(wa(lwa))
 tol=1E-4
 
 write(*,*) "Do the Levenberg-Marquardt fit ...."
-err_sum_best=1D10
-do i=1,nstarts
+err_sum_best2=1000000d0
+err_best=1000000d0
+weigh_best=1.0d0
+do p=1,msls_starts
    iwa=ref_num
    lwa=nlines*ref_num+5*ref_num+nlines+1000
    tol=1E-4
@@ -194,45 +213,44 @@ do i=1,nstarts
 !     Function seems to be convex! First, equal weight for each phase, sum 
 !      shall be 1
 !
-   do j=1,ref_num
-      call random_number(weights(j))
-      weights(j)=weights(j)!*5d0
+   do jind=1,ref_num
+      call random_number(weights(jind))
+      weights(jind)=weights(jind)!*5d0
    end do
 
 !
 !     Perform the Levenberg Maraquardt optimization starting with the 
 !      current random weights
 !
-   call r8vec_print (ref_num, weights, '  Initial parameter values:' )
-
+!   call r8vec_print (ref_num, weights, '  Initial parameter values:' )
    call lmdif1(error_function,nlines,ref_num,weights,fvec,tol,info,iwa,wa,lwa)
 !   
 !     Calculate error sum for current coordinate vector
 !
-   call r8vec_print (ref_num, weights, '  Optimized parameter values:' )
+!   call r8vec_print (ref_num, weights, '  Optimized parameter values:' )
    err_sum=0.d0
-   do j=1,nlines
-      err_sum=err_sum+fvec(j)**2
+   do jind=1,nlines
+      err_sum=err_sum+fvec(jind)**2
    end do
 !
 !     If better local minimum has been found, store its values for global minimum
 !
-   if (err_sum .lt. err_sum_best) then
-      write(*,'(a,i6,a,f17.10)') " STEP ",i,": New best error sum: ",err_sum
-      err_sum_best=err_sum
-      weights_best=weights        
+   if (err_sum .lt. err_best(1)) then
+      write(*,'(a,i6,a,f17.10)') " STEP ",p,": New best error sum: ",err_sum
+      err_best(1)=err_sum
+      weigh_best(:,1)=weights        
    end if
 end do
 
 write(*,*) " ... done!"
-write(*,*) " Error sum of the fit: ",err_sum
+write(*,*) " Error sum of the fit: ",err_best(1)
 
 !
 !     Calculate the weighted reference curves
 !
 do i=1,nlines
    do j=1,ref_num
-      rdf_weight(i,j)=rdf_ref(i,j)*weights(j)
+      rdf_weight(i,j)=rdf_ref(i,j)*weigh_best(j,1)
    end do
 end do
 !
@@ -257,15 +275,15 @@ close(48)
 !
 !    Normalize the weights such that its sum is one for the output
 !
-weights_best=weights_best/sum(weights_best)
+weigh_best=weigh_best/sum(weigh_best)
 write(*,*) 
 write(*,*) "Final weights of the different given reference RDFs:"
 do i=1,ref_num
    write(*,'(a,i2,a,a,a,f13.7)') "  - Reference No. ",i,":      ", &
-       & ref_filename(i)(1:30),": ",weights_best(i)
+       & ref_filename(i)(1:30),": ",weigh_best(i,1)
 end do
 open(unit=45,file="final_weights.dat",status="replace")
-write(45,*) weights_best(:)
+write(45,*) weigh_best(:,1)
 close(45)
 write(*,*) "Final weights written to 'final_weights.dat'."
 
@@ -283,22 +301,22 @@ implicit none
 integer::m_ind,n_ind
 real(kind=8)::fvec(m_ind)
 real(kind=8)::x_var(n_ind)
-integer::i,j,iflag
+integer::i2,j2,iflag
 real(kind=8)::sum1
 
-do i=1,m_ind
+do i2=1,m_ind
    sum1=0.d0
-   do j=1,n_ind
-      sum1=sum1+rdf_ref(i,j)*x_var(j)
+   do j2=1,n_ind
+      sum1=sum1+rdf_ref(i2,j2)*x_var(j2)
    end do
-   fvec(i)=rdf_ana(i)-sum1  
+   fvec(i2)=rdf_ana(i2)-sum1  
 end do
 !
 !    Add a penalty for each negative parameter
 ! 
-do j=1,n_ind
-   if (x_var(j) .lt. 0.d0) then
-      fvec=fvec+x_var(j)**2*1D6
+do j2=1,n_ind
+   if (x_var(j2) .lt. 0.d0) then
+      fvec=fvec+x_var(j2)**2*1D6
    end if
 end do
 
