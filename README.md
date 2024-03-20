@@ -13,6 +13,9 @@ This repository contains a list of scripts and programs that can be used to set 
 calcuations. It was initially designed to support calculations within the [CRC 1453 CLINT](https://www.sfb1452.research.fau.eu/) (catalysis at liquid
 interfaces), but the scripts and programs should be general enough to use them for arbitrary VASP calculations
 of surface or bulk systems.
+
+A description of all scripts/programs as well as an overview of important VASP calculations and how to do them is given in the [VASP4CLINT-Wiki](https://github.com/Trebonius91/VASP4CLINT/wiki)!
+
 In addition to the scripts, a manual is delivered (subfolder manual), where a general overview for the setup
 of VASP calculations for interface systems is given besides the detailed explanation of all included scripts and programs.
 
