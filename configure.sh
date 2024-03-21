@@ -1,6 +1,6 @@
 # This script compiles all Fortran programs in the VASP4CLINT repository
 compiler="gfortran"
-libraries=" -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp"
+libraries=" -llapack"
 
 cd fortran
 #$compiler -Wall $libraries -O1 -o analyze_scalms analyze_scalms.f90

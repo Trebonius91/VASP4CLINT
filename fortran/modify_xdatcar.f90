@@ -13,6 +13,7 @@ integer::i,j,k,l,m
 integer::readstat,openstat,counter,endl
 integer::natoms,nelems,xdat_lines,nframes
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
+real(kind=8),allocatable::a_vecs(:,:),b_vecs(:,:),c_vecs(:,:)
 character(len=2),allocatable::el_names_read(:),el_names(:)
 character(len=2),allocatable::at_names(:),at_names2(:)
 integer,allocatable::el_nums(:)
@@ -23,9 +24,10 @@ real(kind=8)::shift_vec(3),act_val,xyz_print(3)
 integer::multiply_vec(3),pick_ind,pos_new,multiply_prod
 integer::frame_first,frame_last,line_num
 integer::read_freq
+logical::npt
 logical::eval_stat(10)
 logical::shift_cell,multiply_cell,pick_frame,print_xyz,print_last
-character(len=120)::a120,cdum,arg
+character(len=120)::a120,cdum,arg,adum
 character(len=220)::a220
 character(len=50)::atest
 
@@ -157,7 +159,7 @@ end do
 
 
 if ((.not. shift_cell) .and. (.not. multiply_cell) .and. (.not. pick_frame) .and. &
-           &  (.not. print_xyz) .and. (.not. print_last)) then
+           &  (.not. print_xyz) .and. (.not. print_last) .and. (read_freq .eq. 1)) then
    write(*,*)
    write(*,*) "Please give at least one of the possible commands!"
    write(*,*)
@@ -214,6 +216,26 @@ read(14,*) el_nums
 natoms = sum(el_nums)
 allocate(at_names(natoms))
 
+!
+!    Check if the trajectory is an NVT or NPT trajectory
+!
+read(14,*)
+do i=1,natoms
+   read(14,*)
+end do
+read(14,*) adum
+!
+!    How does the first line of the second frame begin? If it begins 
+!    with Direct or direct, the trajectory is a NVT trajectory
+!
+if (trim(adum) .eq. "Direct" .or. trim(adum) .eq. "direct") then
+   npt=.false.
+   write(*,*) "A NVT trajectory (constant unit cell) has been detected."
+else
+   npt=.true.
+   write(*,*) "A NpT trajectory (varying unit cell) has been detected."
+end if
+
 counter = 1
 do i=1,nelems
    do j=1,el_nums(i)
@@ -221,8 +243,11 @@ do i=1,nelems
       counter = counter +1
    end do
 end do
-
-nframes = (xdat_lines - 7)/(natoms+1)
+if (npt) then
+   nframes = (xdat_lines - 7)/(natoms+8)
+else
+   nframes = (xdat_lines - 7)/(natoms+1)
+end if
 !
 !    If the read frequency is larger than 1, divide the number of 
 !       frames by it!
@@ -239,10 +264,23 @@ else
    frame_first=1
 end if
 
+!
+!    Allocate global coordinate arrays
+!
 allocate(xyz(3,natoms,nframes))
+if (npt) then
+   allocate(a_vecs(3,nframes))
+   allocate(b_vecs(3,nframes))
+   allocate(c_vecs(3,nframes))
+end if
+
 !
 !    Read in the coordinates of the frames and correct for image flags
 !
+
+close(14)
+open(unit=14,file="XDATCAR",status="old")
+
 eval_stat = .false.
 write(*,*)
 write(*,*) "Read in the trajectory from XDATCAR..."
@@ -260,6 +298,35 @@ do i=1,nframes
       end if
    end do
    read(14,*)
+!
+!     A NPT trajectory
+!
+   if (npt) then
+      read(14,*)
+      read(14,*) a_vecs(:,i)
+      read(14,*) b_vecs(:,i)
+      read(14,*) c_vecs(:,i) 
+      read(14,*)
+      read(14,*)
+      read(14,*)
+!
+!     A NVT trajectory
+!
+   else
+      if (i .eq. 1) then 
+         read(14,*)
+         read(14,*) 
+         read(14,*) 
+         read(14,*) 
+         read(14,*)
+         read(14,*)
+         read(14,*)
+      end if
+   end if
+   
+!
+!     A NVT trajectory
+!
    do j=1,natoms
       read(14,'(a)') a120
       read(a120,*,iostat=readstat) act_num(:)
@@ -302,11 +369,17 @@ do i=1,nframes
 !
    if (read_freq .gt. 1) then
       do j=1,read_freq-1
-         do k=1,natoms+1
-            read(14,*)
-         end do
+         if (npt) then
+            do k=1,natoms+8
+               read(14,*)
+            end do
+         else
+            do k=1,natoms+1
+               read(14,*)
+            end do
+         end if
       end do
-   end if        
+   end if
 end do
 write(*,*) " completed!"
 close(14)
@@ -363,9 +436,17 @@ if (multiply_cell) then
    write(*,'(a,i4,a,i4,a,i4,a)') " Multipy the unit cell of all frames: ",multiply_vec(1), &
                & " times a, ",multiply_vec(2)," times b, ",multiply_vec(3)," times c"
    multiply_prod=multiply_vec(1)*multiply_vec(2)*multiply_vec(3)
-   a_vec=a_vec*multiply_vec(1)
-   b_vec=b_vec*multiply_vec(2)
-   c_vec=c_vec*multiply_vec(3)
+   if (npt) then
+      do i=1,nframes
+         a_vecs(:,i)=a_vecs(:,i)*multiply_vec(1)
+         b_vecs(:,i)=b_vecs(:,i)*multiply_vec(2)
+         c_vecs(:,i)=c_vecs(:,i)*multiply_vec(3)
+      end do
+   else
+      a_vec=a_vec*multiply_vec(1)
+      b_vec=b_vec*multiply_vec(2)
+      c_vec=c_vec*multiply_vec(3)
+   end if
    el_nums=el_nums*multiply_prod
    allocate(xyz2(3,natoms*multiply_prod,nframes),at_names2(natoms*multiply_prod))
    do i=1,nframes
@@ -415,12 +496,21 @@ if (pick_frame) then
       write(33,*) natoms
       write(33,'(a,i10,a)') " Frame ",pick_ind," picked from XDATCAR by modify_xdatcar"
       do j=1,natoms
-         xyz_print(1)=(xyz2(1,j,pick_ind)*a_vec(1)+xyz2(2,j,pick_ind)*b_vec(1)+ &
-                      & xyz2(3,j,pick_ind)*c_vec(1))*factor
-         xyz_print(2)=(xyz2(1,j,pick_ind)*a_vec(2)+xyz2(2,j,pick_ind)*b_vec(2)+ &
-                      & xyz2(3,j,pick_ind)*c_vec(2))*factor
-         xyz_print(3)=(xyz2(1,j,pick_ind)*a_vec(3)+xyz2(2,j,pick_ind)*b_vec(3)+ &
+         if (npt) then
+            xyz_print(1)=(xyz2(1,j,pick_ind)*a_vecs(1,pick_ind)+xyz2(2,j,pick_ind)* &
+                         & b_vecs(1,pick_ind)+xyz2(3,j,pick_ind)*c_vecs(1,pick_ind))*factor
+            xyz_print(2)=(xyz2(1,j,pick_ind)*a_vecs(2,pick_ind)+xyz2(2,j,pick_ind)* &
+                         & b_vecs(2,pick_ind)+xyz2(3,j,pick_ind)*c_vecs(2,pick_ind))*factor
+            xyz_print(3)=(xyz2(1,j,pick_ind)*a_vecs(3,pick_ind)+xyz2(2,j,pick_ind)* &
+                         & b_vecs(3,pick_ind)+xyz2(3,j,pick_ind)*c_vecs(3,pick_ind))*factor
+         else
+            xyz_print(1)=(xyz2(1,j,pick_ind)*a_vec(1)+xyz2(2,j,pick_ind)*b_vec(1)+ &
+                         & xyz2(3,j,pick_ind)*c_vec(1))*factor
+            xyz_print(2)=(xyz2(1,j,pick_ind)*a_vec(2)+xyz2(2,j,pick_ind)*b_vec(2)+ &
+                         & xyz2(3,j,pick_ind)*c_vec(2))*factor
+            xyz_print(3)=(xyz2(1,j,pick_ind)*a_vec(3)+xyz2(2,j,pick_ind)*b_vec(3)+ &
                       & xyz2(3,j,pick_ind)*c_vec(3))*factor
+         end if
          write(34,*) at_names2(j),xyz_print(:)
       end do
       close(33)  
@@ -431,9 +521,15 @@ if (pick_frame) then
       open(unit=33,file="POSCAR_pick",status="replace")
       write(33,'(a,i10,a)') " Frame ",pick_ind," picked from XDATCAR by modify_xdatcar"
       write(33,*) factor
-      write(33,'(3f15.6)') a_vec
-      write(33,'(3f15.6)') b_vec
-      write(33,'(3f15.6)') c_vec
+      if (npt) then
+         write(33,'(3f15.6)') a_vecs(:,pick_ind)
+         write(33,'(3f15.6)') b_vecs(:,pick_ind)
+         write(33,'(3f15.6)') c_vecs(:,pick_ind)
+      else
+         write(33,'(3f15.6)') a_vec
+         write(33,'(3f15.6)') b_vec
+         write(33,'(3f15.6)') c_vec
+      end if
       do j=1,nelems
          write(33,'(a,a)',advance="no") el_names(j),"  "
       end do
@@ -477,34 +573,33 @@ if (print_xyz) then
       write(34,*) natoms
       write(34,*) "Trajectory converted from XDATCAR file via modify_xdatcar"
       do j=1,natoms
-         xyz_print(1)=(xyz2(1,j,i)*a_vec(1)+xyz2(2,j,i)*b_vec(1)+xyz2(3,j,i)*c_vec(1))*factor
-         xyz_print(2)=(xyz2(1,j,i)*a_vec(2)+xyz2(2,j,i)*b_vec(2)+xyz2(3,j,i)*c_vec(2))*factor
-         xyz_print(3)=(xyz2(1,j,i)*a_vec(3)+xyz2(2,j,i)*b_vec(3)+xyz2(3,j,i)*c_vec(3))*factor
+         if (npt) then
+            xyz_print(1)=(xyz2(1,j,i)*a_vecs(1,i)+xyz2(2,j,i)*b_vecs(1,i)+ &
+                         & xyz2(3,j,i)*c_vecs(1,i))*factor
+            xyz_print(2)=(xyz2(1,j,i)*a_vecs(2,i)+xyz2(2,j,i)*b_vecs(2,i)+ &
+                         & xyz2(3,j,i)*c_vecs(2,i))*factor
+            xyz_print(3)=(xyz2(1,j,i)*a_vecs(3,i)+xyz2(2,j,i)*b_vecs(3,i)+ & 
+                         & xyz2(3,j,i)*c_vecs(3,i))*factor
+         else 
+            xyz_print(1)=(xyz2(1,j,i)*a_vec(1)+xyz2(2,j,i)*b_vec(1)+ &
+                         & xyz2(3,j,i)*c_vec(1))*factor
+            xyz_print(2)=(xyz2(1,j,i)*a_vec(2)+xyz2(2,j,i)*b_vec(2)+ &
+                         & xyz2(3,j,i)*c_vec(2))*factor
+            xyz_print(3)=(xyz2(1,j,i)*a_vec(3)+xyz2(2,j,i)*b_vec(3)+ &
+                         & xyz2(3,j,i)*c_vec(3))*factor
+         end if
          write(34,*) at_names2(j),xyz_print(:)
       end do
    end do
    close(34)
    write(*,*) "completed!"
 else 
-   if (shift_cell .or. multiply_cell .or. print_last) then
+   if (shift_cell .or. multiply_cell .or. print_last .or. (read_freq .gt. 1)) then
       write(*,*) "Write trajectory in VASP format to file XDATCAR_mod"
       if (frame_last .ne. 0) then
          write(*,'(a,i10,a)') " Only the last ",frame_last," frames will be written."
       end if
       open(unit=34,file="XDATCAR_mod",status="replace")
-      write(34,*) "Trajectory written by modify_xdatcar"
-      write(34,*) factor
-      write(34,'(3f15.6)') a_vec
-      write(34,'(3f15.6)') b_vec
-      write(34,'(3f15.6)') c_vec
-      do j=1,nelems
-         write(34,'(a,a)',advance="no") el_names(j),"  "
-      end do 
-      write(34,*)
-      do j=1,nelems
-         write(34,'(i6,a)',advance="no") el_nums(j)," "
-      end do
-      write(34,*)
       do i=frame_first,nframes
          do j=1,10
             if (real(i)/real(nframes-frame_first) .gt. real(j)*0.1d0) then
@@ -514,7 +609,34 @@ else
                end if
             end if
          end do
-
+         if (npt) then
+            write(34,*) "NpT Trajectory written by modify_xdatcar"
+            write(34,*) factor
+            write(34,'(3f15.6)') a_vecs(:,i)
+            write(34,'(3f15.6)') b_vecs(:,i)
+            write(34,'(3f15.6)') c_vecs(:,i)
+            do j=1,nelems
+               write(34,'(a,a)',advance="no") el_names(j),"  "
+            end do
+            write(34,*)
+            do j=1,nelems
+               write(34,'(i6,a)',advance="no") el_nums(j)," "
+            end do
+         else if (i .eq. frame_first) then
+            write(34,*) "NVT Trajectory written by modify_xdatcar"
+            write(34,*) factor
+            write(34,'(3f15.6)') a_vec
+            write(34,'(3f15.6)') b_vec
+            write(34,'(3f15.6)') c_vec
+            do j=1,nelems
+               write(34,'(a,a)',advance="no") el_names(j),"  "
+            end do
+            write(34,*)
+            do j=1,nelems
+               write(34,'(i6,a)',advance="no") el_nums(j)," "
+            end do
+         end if
+ 
          write(34,*) "Direct configuration=  ",i
          do j=1,natoms
             write(34,'(3f15.8)') xyz2(:,j,i) 

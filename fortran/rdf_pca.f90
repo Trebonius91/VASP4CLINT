@@ -9,22 +9,23 @@
 
 module rdf_mod
 implicit none
-real(kind=8),allocatable::rdf_ana(:),rdf_ref(:,:)
+real(kind=8),allocatable::rdf_ana(:,:),rdf_ref(:,:)
+integer::frame_act
 end module rdf_mod
 
 program rdf_pca
 use rdf_mod
 implicit none
-integer::i,j,k,l,m
+integer::i,j,k,l,m,q
 integer::readstat
-integer::nstarts
-integer::nlines,idum,nlines_old
+integer::nstarts,nframes
+integer::nlines,nlines2,idum,nlines_old
 real(kind=8)::adum
 character(len=100)::arg
 character(len=2)::indname
-character(len=100)::ana_filename
+character(len=100)::ana_filename,cdum
 character(len=100)::ref_filename(99)
-logical::ref_read(99)
+logical::ref_read(99),count_lines
 real(kind=8),allocatable::weights(:),deriv(:)
 real(kind=8),allocatable::weights_best(:)
 real(kind=8),allocatable::x_vals(:)
@@ -34,7 +35,7 @@ real(kind=8),allocatable::fvec(:),rdf_approx(:)
 real(kind=8),allocatable::fvec_best(:)
 real(kind=8),allocatable::rdf_weight(:,:)
 real(kind=8)::tol
-real(kind=8)::err_best(1)
+real(kind=8),allocatable::err_best(:)
 real(kind=8),allocatable::weigh_best(:,:)
 integer::iwa,lwa,info
 integer::iind,jind,p
@@ -138,32 +139,52 @@ end do
 !
 !    First determine the number of lines per frame
 !
+!    Time-dependent profiles can also be analyzed! 
+!    In this case, count the number of frames as well
+!
 nlines=0
+nlines2=0
 open(unit=34,file=ana_filename,status="old",iostat=readstat)
 if (readstat .ne. 0) then
    write(*,*) "The file with the analyzed RDF profile (",trim(ana_filename),") is not there!"
    stop 
 end if
+count_lines=.true.
 do
-   read(34,*,iostat=readstat) idum,adum,adum
-   if (readstat .ne. 0) exit
-   nlines=nlines+1
+   adum=1D17
+   read(34,'(a)',iostat=readstat) cdum
+   if (len(trim(cdum)) .lt. 5) then
+      count_lines = .false.
+      read(34,*,iostat=readstat) idum,adum,adum
+      if (readstat .ne. 0) exit   
+   end if
+   if (count_lines) then
+      nlines=nlines+1
+   end if
+   nlines2=nlines2+1
 end do
+nframes=int(nlines2/(nlines+1))
+
+
 close(34)
+
 
 write(*,'(a,i10)')  "  - Number of starts in the MSLS algorithm: ",msls_starts
 write(*,'(a,i10)')  "  - Number of plot points in RDFs: ",nlines
+write(*,'(a,i10)')  "  - Number of RDF time frames: ",nframes
 write(*,*)
 
 allocate(x_vals(nlines))
-allocate(rdf_ana(nlines))
+allocate(rdf_ana(nlines,nframes))
 allocate(rdf_ref(nlines,ref_num))
 !
 !    Read in the analyzed RDF profile
 !
 open(unit=34,file=ana_filename,status="old")
-do i=1,nlines
-   read(34,*) idum,x_vals(i),rdf_ana(i)
+do i=1,nframes
+   do j=1,nlines
+      read(34,*) idum,x_vals(j),rdf_ana(j,i)
+   end do
 end do
 close(34)
 
@@ -193,7 +214,8 @@ allocate(fvec_best(nlines))
 allocate(weights_best(ref_num))
 allocate(rdf_approx(nlines))
 allocate(rdf_weight(nlines,ref_num))
-allocate(weigh_best(ref_num,1))
+allocate(weigh_best(ref_num,nframes))
+allocate(err_best(nframes))
 iwa=ref_num
 lwa=nlines*ref_num+5*ref_num+nlines+1000
 allocate(wa(lwa))
@@ -203,54 +225,57 @@ write(*,*) "Do the Levenberg-Marquardt fit ...."
 err_sum_best2=1000000d0
 err_best=1000000d0
 weigh_best=1.0d0
-do p=1,msls_starts
-   iwa=ref_num
-   lwa=nlines*ref_num+5*ref_num+nlines+1000
-   tol=1E-4
+do q=1,nframes
+   frame_act=q
+   do p=1,msls_starts
+      iwa=ref_num
+      lwa=nlines*ref_num+5*ref_num+nlines+1000
+      tol=1E-4
 !
 !     Random initialize weights (sum needs not to be 1 always)
 !
 !     Function seems to be convex! First, equal weight for each phase, sum 
 !      shall be 1
 !
-   do jind=1,ref_num
-      call random_number(weights(jind))
-      weights(jind)=weights(jind)!*5d0
-   end do
+      do jind=1,ref_num
+         call random_number(weights(jind))
+         weights(jind)=weights(jind)!*5d0
+      end do
 
 !
 !     Perform the Levenberg Maraquardt optimization starting with the 
 !      current random weights
 !
 !   call r8vec_print (ref_num, weights, '  Initial parameter values:' )
-   call lmdif1(error_function,nlines,ref_num,weights,fvec,tol,info,iwa,wa,lwa)
+      call lmdif1(error_function,nlines,ref_num,weights,fvec,tol,info,iwa,wa,lwa)
 !   
 !     Calculate error sum for current coordinate vector
 !
 !   call r8vec_print (ref_num, weights, '  Optimized parameter values:' )
-   err_sum=0.d0
-   do jind=1,nlines
-      err_sum=err_sum+fvec(jind)**2
-   end do
+      err_sum=0.d0
+      do jind=1,nlines
+         err_sum=err_sum+fvec(jind)**2
+      end do
 !
 !     If better local minimum has been found, store its values for global minimum
 !
-   if (err_sum .lt. err_best(1)) then
-      write(*,'(a,i6,a,f17.10)') " STEP ",p,": New best error sum: ",err_sum
-      err_best(1)=err_sum
-      weigh_best(:,1)=weights        
-   end if
+      if (err_sum .lt. err_best(1)) then
+         write(*,'(a,i6,a,f17.10)') " STEP ",p,": New best error sum: ",err_sum
+         err_best(q)=err_sum
+         weigh_best(:,q)=weights        
+      end if
+   end do
 end do
 
 write(*,*) " ... done!"
-write(*,*) " Error sum of the fit: ",err_best(1)
+write(*,*) " Error sum of the fit (final frame): ",err_best(nframes)
 
 !
 !     Calculate the weighted reference curves
 !
 do i=1,nlines
    do j=1,ref_num
-      rdf_weight(i,j)=rdf_ref(i,j)*weigh_best(j,1)
+      rdf_weight(i,j)=rdf_ref(i,j)*weigh_best(j,nframes)
    end do
 end do
 !
@@ -264,26 +289,36 @@ do i=1,nlines
    end do
 end do
 write(*,*)
-write(*,*) "Fitted curve as well as optimized components written to "
+write(*,*) "Fitted curve as well as optimized components (last frame) written to "
 write(*,*) " file 'rdf_approx.dat'"
 open(unit=48,file="rdf_approx.dat",status="replace")
 write(48,*) "# dist (Angs)     true RDF     approximated RDF      component 1-i ..."
 do i=1,nlines
-   write(48,*) x_vals(i),rdf_ana(i),rdf_approx(i),rdf_weight(i,:)
+   write(48,*) x_vals(i),rdf_ana(i,nframes),rdf_approx(i),rdf_weight(i,:)
 end do
 close(48)
 !
 !    Normalize the weights such that its sum is one for the output
 !
-weigh_best=weigh_best/sum(weigh_best)
+do j=1,nframes
+   do i=1,ref_num
+      if (weigh_best(i,j) .lt. 0.d0) then
+         weigh_best(i,j) = 0.d0
+      end if 
+   end do
+   weigh_best(:,j)=weigh_best(:,j)/sum(weigh_best(:,j))
+end do
 write(*,*) 
-write(*,*) "Final weights of the different given reference RDFs:"
+write(*,*) "Final weights of the different given reference RDFs (last frame):"
 do i=1,ref_num
    write(*,'(a,i2,a,a,a,f13.7)') "  - Reference No. ",i,":      ", &
-       & ref_filename(i)(1:30),": ",weigh_best(i,1)
+       & ref_filename(i)(1:30),": ",weigh_best(i,nframes)
 end do
 open(unit=45,file="final_weights.dat",status="replace")
-write(45,*) weigh_best(:,1)
+write(45,*) "#  RDF frame    weights of components"
+do i=1,nframes
+   write(45,*) i,weigh_best(:,i)
+end do
 close(45)
 write(*,*) "Final weights written to 'final_weights.dat'."
 
@@ -309,7 +344,7 @@ do i2=1,m_ind
    do j2=1,n_ind
       sum1=sum1+rdf_ref(i2,j2)*x_var(j2)
    end do
-   fvec(i2)=rdf_ana(i2)-sum1  
+   fvec(i2)=rdf_ana(i2,frame_act)-sum1  
 end do
 !
 !    Add a penalty for each negative parameter
