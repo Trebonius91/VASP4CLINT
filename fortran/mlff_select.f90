@@ -199,7 +199,7 @@ do i = 1, command_argument_count()
       write(*,*) " -neigh_classes=[number] : Number of diversity-based neighborhood"
       write(*,*) "    classes (per number of atoms in the environment, the number"
       write(*,*) "    subdivisions, sorted by the diversity (respect to elements)"
-      write(*,*) "    of the neighborhoods. DEFAULT: 4"
+      write(*,*) "    of the neighborhoods. DEFAULT: 50"
       write(*,*) " -bas_scale=('linear' or 'root') : How the number of basis functions"
       write(*,*) "    allocated to a certain neighborhood class shall scale with"
       write(*,*) "    the number of atoms contained into it."
@@ -445,7 +445,7 @@ adf_weight=1.d0/(rdf_adf+1.d0)
 !
 !     The number of neighborhood classes
 !
-neigh_classes=4
+neigh_classes=50
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
    if (trim(arg(1:15))  .eq. "-neigh_classes=") then
@@ -2139,7 +2139,7 @@ do i=1,nconfs_out
    write(56,'(a)') "=================================================="
    write(56,'(a)') "     CTIFOR"
    write(56,'(a)') "--------------------------------------------------"
-   write(56,'(a)') "  " !ctifors(trans_conf(i))  
+   write(56,'(a)') ctifors(trans_conf(i))  
    write(56,'(a)') "=================================================="
    write(56,'(a)') "     Primitive lattice vectors (ang.)"
    write(56,'(a)') "--------------------------------------------------"
