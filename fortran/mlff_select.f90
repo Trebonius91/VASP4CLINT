@@ -1411,6 +1411,12 @@ do i=1,natoms_sum
       do j=1,nelems
          if (ind_all(i) .eq. ind_list(j)) then
             inc=sum(num_around(:,i))
+!
+!    If an atom has no neighbors, sort it into the one neighbor bin
+!
+            if (inc .eq. 0) then
+               inc=inc+1
+            end if        
             neigh_global(j,inc)=neigh_global(j,inc)+1
             neighnum_global(i)=neighnum_global(i)+inc
          end if
