@@ -1895,11 +1895,11 @@ write(34,*)
 write(34,*) "Prepare final writeout of selected configurations..."
 flush(34)
 
-do i=1,nelems
-   do j=1,nbasis(i)
-      write(23,*) i,j,final_choice(j,i)
-   end do
-end do
+!do i=1,nelems
+!   do j=1,nbasis(i)
+!      write(23,*) i,j,final_choice(j,i)
+!   end do
+!end do
 
 
 !
