@@ -38,7 +38,7 @@ write(*,*) "    -element=Pt,Ga,In or -element=all"
 write(*,*) " -index=[one or more indices] : If certain atoms shall be analyzed."
 write(*,*) "    One or more indices can be given. Examples: -index=103 or "
 write(*,*) "    -index=13,103,201"
-write(*,*) " -orbital[name] : Which orbitals shall be analyzed for the given "
+write(*,*) " -orbital=[name(s)] : Which orbitals shall be analyzed for the given "
 write(*,*) "    elements or atom indices. Either 'all' for all orbitals or "
 write(*,*) "    one or several descriptors need to be given, possible are:"
 write(*,*) "    s,px,py,pz,dxy,dyz,dz2,dxz,dx2y2. As shortcuts can further be "
@@ -46,6 +46,9 @@ write(*,*) "    used: p (all p-orbitals), d (all d-orbitals).  "
 write(*,*) "    Examples: -orbital=all or -orbital=s or -orbital=p,dxy,dxz"
 write(*,*) "If both -element=all and -orbital=all are given, only the global DOS"
 write(*,*) " will be written, since then the whole wavefunction is chosen."
+write(*,*) "The Fermi energy will always be subtracted to build the x-axis. If"
+write(*,*) " you want to plot with without the correction, use the Fermi energy"
+write(*,*) " printed in the headers of the files."
 write(*,*)
 !
 !    Read in and process the command line arguments
@@ -107,7 +110,7 @@ do i = 1, command_argument_count()
    if (trim(arg(1:7))  .eq. "-index=") then
       read(arg(8:),*,iostat=readstat) ind_list_read
       if (dos_elements) then
-         write(*,*) "Both -elements=... and -index=... flags were given."
+         write(*,*) "Both -element=... and -index=... flags were given."
          write(*,*) " Please use only one of them at a time!"
          stop
       end if
@@ -136,7 +139,7 @@ if (dos_indices) then
 end if
 
 if ((.not. dos_indices) .and. (.not. dos_elements)) then
-   write(*,*) "Please give either a -elements=... or -index=... selection!"
+   write(*,*) "Please give either a -element=... or -index=... selection!"
    stop
 end if
    
@@ -326,10 +329,13 @@ write(*,*) " ...  success!"
 !     Write the total DOS to a file 
 !
 open(unit=30,file="dos_total.dat",status="replace")
+write(30,*) "# DOS calculated by partial_dos "
+write(30,*) "# Fermi energy has been subtracted (E_fermi = ",efermi," eV)"
+
 if (ispin .eq. 1) then
-   write(30,*) "# energy(eV)         DOS"
+   write(30,*) "#   energy(eV)             DOS"
 else if (ispin .eq. 2) then 
-   write(30,*) "# energy(eV)         DOS(up)        DOS(down)"
+   write(30,*) "#   energy(eV)             DOS(up)            DOS(down)"
 end if
 do i=1,npoints
    if (ispin .eq. 1) then
@@ -444,16 +450,19 @@ end if
 !     Write the partial DOS to a file 
 !
 open(unit=30,file="dos_partial.dat",status="replace")
+write(30,*) "# DOS calculated by partial_dos "
+write(30,*) "# Fermi energy has been subtracted (E_fermi = ",efermi," eV)"
+
 if (ispin .eq. 1) then
-   write(30,*) "# energy(eV)         DOS"
+   write(30,*) "#   energy(eV)             DOS  "
 else if (ispin .eq. 2) then
-   write(30,*) "# energy(eV)         DOS(up)        DOS(down)"
+   write(30,*) "#   energy(eV)             DOS(up)            DOS(down) "
 end if
 do i=1,npoints
    if (ispin .eq. 1) then
-      write(30,*) e_dos(i),dos_part_out(i)
+      write(30,*) e_dos(i)-efermi,dos_part_out(i)
    else if (ispin .eq. 2) then
-      write(30,*) e_dos(i),dos_part_out_up(i),dos_part_out_down(i)
+      write(30,*) e_dos(i)-efermi,dos_part_out_up(i),dos_part_out_down(i)
    end if
 end do
 close(30)
