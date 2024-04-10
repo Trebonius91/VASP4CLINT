@@ -36,17 +36,18 @@ print('''
 
  Add -select_dist, if only metal atoms near to the molecule shall
    be optimized (change opt_dist parameter in script)
- Add -rot_surf, if the metal surface shall be rotated by 90 degrees
  Add -random, if the rotations shall be chosen by chance and also the
    positions shall be varied by +/- 0.5 Angstrom in x- and y-direction
  Add -cutout, if atoms of the surface near enough to any adsorbate
    shall be removed to avoid collisions (e.g. for placement in surface)
    (works only for adsorbates in principial unit cell!)
  Further keywords for submission of individual values:
- -z_length=[value]: Desired vacuum along z-axis in Angstrom (default: 23)
+ -dist_act=[value]: The maximum distance to any adsorbate atom, below 
+   which all substrate atoms are set to active, if -select_dist was set
+   (default value: 7.0)
  -dist_cut=[value]: Desired distance to adsorbate atoms below which atoms
    of the surface are removed for being too near (for -cutout active)
-
+   (default value: 2.0)
  The list of molecules will be read in from file 'adsorb_list.dat'
  The format shall be: [Species shortcut] [x-coord] [y-coord] 
  [dist mol-surf(z)] [prec.] [nut.] [rot.] (angles given in degrees)"
@@ -65,8 +66,6 @@ mol_path="/home/jsteffen/work/build_adsorbates_input/"
 # The path where the POTCAR files for the elements are located
 potcar_path = "/scratch/potcar/PAW_PBE.52/"
 
-# Total number of adsorbates available (besides individual molecule)
-adsorb_num = 8
 
 # lists of available ionic liquids
 mol_names = [] 
@@ -375,7 +374,7 @@ z_length=23.0
 mol_surf_dist=2.3
 
 # distance for cutout of surface atoms, if the option "cutout" is activated
-dist_remove=1.8
+dist_remove=2.0
 
 # Check if command line arguments were passed
 
@@ -416,6 +415,11 @@ if len(sys.argv) > 1:
       if arg[0:10] == "-z_length=":
           z_length = float(arg[10:])
           print("Length of vacuum in system along z-axis changed to " + str(z_length) + "A.")
+# Read in the distance to adsorbates below which surface atoms will be removed
+# (only if -cutout option is activated!)
+      if arg[0:10] == "-dist_act=":
+          opt_dist = float(arg[10:])
+          print("Max. distance for active surface atoms changed to " + str(dist_remove) + " A.")
 # Read in the distance to adsorbates below which surface atoms will be removed
 # (only if -cutout option is activated!)
       if arg[0:10] == "-dist_cut=":
