@@ -26,11 +26,14 @@ from scipy.spatial import distance_matrix
 print('''
  This script manages the complete buildup of VASP
  input for systems with molecules adsorbed on surfaces.
- The POSCAR file of a (metal) surface slab (POSCAR_surf) needs
- to be provided. POSCAR files of adsorbed molecules should
- be located in a folder with suitable names (look into the
- script header). A directory for the POTCAR files for the
- elements must be given there as well.
+ The POSCAR file of a  surface slab (POSCAR_surf) needs
+ to be provided. A number of large molecules to be adsorbed 
+ is provided within the script. If other molecules shall be 
+ adsorbed, place their POSCAR files in the current folder, 
+ named as POSCAR_adsx (x=1,2,3,4), see below. Further, all 
+ possible single atoms as well as a large number of diatomic 
+ molecules are prestored as adsorbates.
+
  Add -select_dist, if only metal atoms near to the molecule shall
    be optimized (change opt_dist parameter in script)
  Add -rot_surf, if the metal surface shall be rotated by 90 degrees
@@ -43,8 +46,9 @@ print('''
  -z_length=[value]: Desired vacuum along z-axis in Angstrom (default: 23)
  -dist_cut=[value]: Desired distance to adsorbate atoms below which atoms
    of the surface are removed for being too near (for -cutout active)
+
  The list of molecules will be read in from file 'adsorb_list.dat'
- The format shall be: [Species No or shortcut] [x-coord] [y-coord] 
+ The format shall be: [Species shortcut] [x-coord] [y-coord] 
  [dist mol-surf(z)] [prec.] [nut.] [rot.] (angles given in degrees)"
 ''')
 
@@ -68,24 +72,28 @@ adsorb_num = 8
 mol_names = [] 
 mol_names.append("OTf (Triflate anion)")
 mol_names.append("EMIM (Ethylmethylimidazolium cation)")
-mol_names.append("NTF2 (Bistriflimide anion)")
+mol_names.append("NTF2 (Bistriflimide anion), cis conformer")
+mol_names.append("NTF2 (Bistriflimide anion), trans conformer")
 mol_names.append("C4C1Pyr (Butylmethylimidazolium cation)")
-mol_names.append("CO (Cabonmomoxide)")
-mol_names.append("H2 (Hydrogen molecule)")
-mol_names.append("H1 (Hydrogen atom)")
-mol_names.append("Ga1 (Gallium atom)")
-mol_names.append("POSCAR_ads from local folder")
+mol_names.append("POSCAR_ads1 from local folder")
+mol_names.append("POSCAR_ads2 from local folder")
+mol_names.append("POSCAR_ads3 from local folder")
+mol_names.append("POSCAR_ads4 from local folder")
 
 mol_short = []
 mol_short.append("otf")
 mol_short.append("emim")
-mol_short.append("ntf2")
+mol_short.append("ntf2_cis")
+mol_short.append("ntf2_trans")
 mol_short.append("c4c1pyr")
-mol_short.append("co")
-mol_short.append("h2")
-mol_short.append("h1")
-mol_short.append("ga1")
-mol_short.append("local")
+mol_short.append("local1")
+mol_short.append("local2")
+mol_short.append("local3")
+mol_short.append("local4")
+
+# Total number of large adsorbates available
+adsorb_num = len(mol_short)
+
 
 # POSCAR files with adsorbate molecules
 adsorbate_dict = {'otf' : '''Shifted unit cell system
@@ -133,7 +141,7 @@ Direct
 0.3400218229444465 0.39200631559932764 0.6090216376816193
 0.351440256283271 0.4640712527198715 0.5988616396927227
 0.41057471090321784 0.5577968628858657 0.5831964870166698''',\
-        'ntf2': '''Converted_POSCAR
+        'ntf2_trans': '''Converted_POSCAR
 1.0
 +10.0000000000  +0.0000000000  +0.0000000000 
  +0.0000000000 +10.0000000000  +0.0000000000
@@ -156,6 +164,29 @@ Cartesian
  +1.5545319418  +1.3570404913  -1.6049956141
  +0.7379110758  +0.5381487139  -0.1078039484
  -2.0537204246  +1.1546759088  +0.6297128669''',\
+        'ntf2_cis':'''Converted_POSCAR
+1.0
+20.0  0.0  0.0
+0.0  20.0  0.0
+0.0  0.0  20.0
+N O S F C
+1 4 2 6 2
+Cartesian
+9.12299958159368 11.112493725869735 9.805669678676395
+8.301667623486113 11.434768419691038 12.171035736221498
+7.80667046213818 9.294769949341179 10.979209405387362
+11.384493532277846 11.320917559595744 10.925030715685185
+10.828066058172563 9.2580879930646 9.628827143723324
+10.68185741496969 10.677730531599577 9.841973563552953
+8.044179962472038 10.717040756889082 10.945968181165936
+6.66758786164786 12.844982400310597 10.104942127619926
+6.344138967024845 11.02860035820222 8.906865873754265
+5.472177029855038 11.187340069208028 10.921502581266347
+12.550069177420758 11.335248521191978 8.1353281757548
+10.962712082345062 12.849956607849206 8.310746729644103
+10.591360740473613 10.992502103913496 7.192041545964713
+6.5279241390731375 11.508909910963599 10.14892242758139
+11.222195367049363 11.532411092309895 8.249066114001605''',\
          'c4c1pyr': '''Converted_POSCAR
    1.00000000000000
     20.0000000000000000    0.0000000000000000    0.0000000000000000
@@ -233,6 +264,100 @@ Direct
 Direct
   0.5415129778966685  0.5000447848173878  0.5004552151826146'''}
 
+#
+#     Dictionary of common diatomic molecules with known bond 
+#     lengths (taken from https://cccbdb.nist.gov/diatomicexpbondx.asp)
+#
+diatomic_dict = {
+   "h-h" : 0.741,
+   "li-li" : 2.673,
+   "be-be" : 2.460,
+   "b-b" : 1.590,
+   "c-c" : 1.243,
+   "n-n" : 1.098,
+   "o-o" : 1.208,
+   "f-f" : 1.412,
+   "ne-ne" : 3.100,
+   "na-na" : 3.079,
+   "mg-mg" : 3.891,
+   "al-al" : 2.701,
+   "si-si" : 2.246,
+   "p-p" : 1.893,
+   "s-s" : 1.889,
+   "cl-cl" : 1.988,
+   "ar-ar" : 3.758,
+   "k-k" : 3.905,
+   "cu-cu" : 2.220,
+   "as-as" : 2.103,
+   "se-se" : 2.166,
+   "br-br" : 2.281,
+   "te-te" : 2.557,
+   "i-i" : 2.665,
+   "h-li" : 1.595,
+   "li-h" : 1.595,
+   "h-be" : 1.343,
+   "be-h" : 1.343,
+   "h-b" : 1.232,
+   "b-h" : 1.232,
+   "h-c" : 1.120,
+   "c-h" : 1.120,
+   "h-n" : 1.036,
+   "n-h" : 1.036,
+   "h-o" : 0.970,
+   "o-h" : 0.970,
+   "h-f" : 0.917,
+   "f-h" : 0.917,
+   "li-o" : 1.688,
+   "o-li" : 1.688,
+   "be-o" : 1.311,
+   "o-be" : 1.311,
+   "be-f" : 1.361,
+   "f-be" : 1.361,
+   "b-c" : 1.491,
+   "c-b" : 1.491,
+   "b-n" : 1.325,
+   "n-b" : 1.325,
+   "b-f" : 1.267,
+   "f-b" : 1.267,
+   "c-n" : 1.172,
+   "n-c" : 1.172,
+   "n-o" : 1.154,
+   "o-n" : 1.154,
+   "n-f" : 1.317,
+   "f-n" : 1.317,
+   "c-o" : 1.128,
+   "o-c" : 1.128,
+   "o-f" : 1.354,
+   "f-o" : 1.354,
+   "h-cl" : 1.275,
+   "cl-h" : 1.275,
+   "h-br" : 1.414,
+   "br-h" : 1.414,
+   "h-i" : 1.609,
+   "i-h" : 1.609 
+}
+
+
+#
+#     Dictionary for single atoms (all to Rn)
+#
+single_atom_dict = {
+   "h" : "H", "he" : "He", "li" : "Li", "be" : "Be", "b" : "B",
+   "c" : "C", "n" : "N", "o" : "O", "f" : "F", "ne" : "Ne",
+   "na" : "Na", "mg" : "Mg", "al" : "Al", "si" : "Si",
+   "p" : "P", "s" : "S", "cl" : "Cl", "ar" : "Ar", "k" : "K",
+   "ca" : "Ca", "sc" : "Sc",  "ti" : "Ti", "v" : "V", "cr" : "Cr",
+   "mn" : "Mn", "fe" : "Fe", "co" : "Co", "ni" : "Ni", "cu" : "Cu",
+   "zn" : "Zn", "ga" : "Ga", "ge" : "Ge", "as" : "As", "ge" : "Ge",
+   "as" : "As", "se" : "Se", "br" : "Br", "kr" : "Kr", "rb" : "Rb",
+   "sr" : "Sr", "y" : "Y", "zr" : "Zr", "nb" : "Nb", "mo" : "Mo",
+   "tc" : "Tc", "ru" : "Ru", "rh" : "Rh", "pd" : "Pd", "ag" : "Ag",
+   "cd" : "Cd", "in" : "In", "sn" : "Sn", "sb" : "Sb", "te" : "Tb",
+   "i" : "I", "xe" : "Xe", "cs" : "Ba", "ba" : "Ba", "la" : "La",
+   "hf" : "Hf", "ta" : "Ta", "w" : "W", "re" : "Re", "os" : "Os",
+   "ir" : "Ir", "pt" : "Pt", "au" : "Au", "hg" : "Hg", "tl" : "Tl",
+   "pb" : "Pb", "bi" : "Bi", "po" : "Po", "at" : "Ai", "rn" : "Rn" 
+}
 
 
 
@@ -413,8 +538,9 @@ class IL_Molecule:
 #
 #    The general constructor
 #
-   def __init__(self, IL_spec, IL_xpos0, IL_ypos0, IL_surf_dist,IL_prec, IL_nut, IL_rot):
+   def __init__(self, IL_spec, IL_type, IL_xpos0, IL_ypos0, IL_surf_dist,IL_prec, IL_nut, IL_rot):
       self.spec = IL_spec
+      self.type = IL_type
       self.xpos0 = IL_xpos0
       self.ypos0 = IL_ypos0
       self.surf_dist = IL_surf_dist
@@ -424,95 +550,157 @@ class IL_Molecule:
 #
 #    Read in the structure of the molecule
 #
-   def ReadMolecule(self, mol_name):
+   def ReadMolecule(self):
 
 #
-#    Either read from the local file POSCAR ads or from the dictionary of the 
-#    python script itself!
+#    Read in or define the geometry of the molecule, depending on its kind
+#    (large molecule, diatomic molecule or single atom)
 #
-    
-      if mol_name == "POSCAR_ads":
-         mol_in = open(mol_name,"r") 
-      elif mol_name == "POSCAR_ads2":
-         mol_in = open(mol_name,"r") 
-      else:   
-         mol_in = io.StringIO(adsorbate_dict[mol_name])
+#    A: large molecule (open POSCAR file or string with file formate)
+#      special subcase: read directly from local POSCAR files!
+#
+      if self.type == "large": 
+         if self.spec == "local1":
+            mol_in = open("POSCAR_ads1","r")
+         elif self.spec == "local2":
+            mol_in = open("POSCAR_ads2","r")
+         elif self.spec == "local3":
+            mol_in = open("POSCAR_ads3","r")
+         elif self.spec == "local4":
+            mol_in = open("POSCAR_ads4","r")
+         else:   
+            mol_in = io.StringIO(adsorbate_dict[self.spec])
 
-      with mol_in as infile:
-         line = infile.readline().rstrip("\n")
+         with mol_in as infile:
+            line = infile.readline().rstrip("\n")
 
-         line = infile.readline().rstrip("\n")
-         mol_scale = float(line)  # the global lattice scaling factor
+            line = infile.readline().rstrip("\n")
+            mol_scale = float(line)  # the global lattice scaling factor
    # read in the lattice sizes (cubic primitive assumed)
 
-         a_vecm=np.zeros(3)
-         b_vecm=np.zeros(3)
-         c_vecm=np.zeros(3)
+            a_vecm=np.zeros(3)
+            b_vecm=np.zeros(3)
+            c_vecm=np.zeros(3)
 
-         line = infile.readline().rstrip("\n")
-         a_read = line.rstrip().split()[0:3]
-         line = infile.readline().rstrip("\n")
-         b_read = line.rstrip().split()[0:3]
-         line = infile.readline().rstrip("\n")
-         c_read = line.rstrip().split()[0:3]
-         for i in range(3):
-            a_vecm[i]=float(a_read[i])
-            b_vecm[i]=float(b_read[i])
-            c_vecm[i]=float(c_read[i])
-         xlen=a_vecm[0]
-         ylen=b_vecm[1]
-         zlen=c_vecm[2]
+            line = infile.readline().rstrip("\n")
+            a_read = line.rstrip().split()[0:3]
+            line = infile.readline().rstrip("\n")
+            b_read = line.rstrip().split()[0:3]
+            line = infile.readline().rstrip("\n")
+            c_read = line.rstrip().split()[0:3]
+            for i in range(3):
+               a_vecm[i]=float(a_read[i])
+               b_vecm[i]=float(b_read[i])
+               c_vecm[i]=float(c_read[i])
+            xlen=a_vecm[0]
+            ylen=b_vecm[1]
+            zlen=c_vecm[2]
    # read in the element ordering
-         line = infile.readline().rstrip("\n")
-         self.elements = line.rstrip().split()
-         self.nelem = len(self.elements)
+            line = infile.readline().rstrip("\n")
+            self.elements = line.rstrip().split()
+            self.nelem = len(self.elements)
    # read in the number of elements 
-         line = infile.readline().rstrip("\n")
-         line_split = line.rstrip().split()
+            line = infile.readline().rstrip("\n")
+            line_split = line.rstrip().split()
 
-         self.elem_num=[]
-         self.names=[]  # array with element symbols of the molecule (testing)
-         self.natoms=0
-         for i in range(self.nelem):
-            self.elem_num.append(int(line_split[i]))
-            for j in range(self.elem_num[i]):
-                self.names.append(self.elements[i])
+            self.elem_num=[]
+            self.names=[]  # array with element symbols of the molecule (testing)
+            self.natoms=0
+            for i in range(self.nelem):
+               self.elem_num.append(int(line_split[i]))
+               for j in range(self.elem_num[i]):
+                   self.names.append(self.elements[i])
       # total number of atoms in the surface
-            self.natoms=self.natoms+self.elem_num[i]
+               self.natoms=self.natoms+self.elem_num[i]
 
    # read in the list of atoms in the first molecule
-         self.xyz = np.zeros((self.natoms,3))
+            self.xyz = np.zeros((self.natoms,3))
    # one line less, since no selective dynamics is needed!
    # if a index out of range error occures here, change the POSCAR file!
-         line = infile.readline()
-         line_split = line.rstrip().split()
+            line = infile.readline()
+            line_split = line.rstrip().split()
    # Check if direct or cartesian coordinates are used!
-         coord_direct = True
-         if line_split[0] == "Cartesian":
-            coord_direct = False
-         elif line_split[0] == "Direct":
             coord_direct = True
-         for i in range(self.natoms):
-            line = infile.readline().rstrip("\n")
-            xyz_read = line.rstrip().split()[0:3]
-            for j in range(3):
-               self.xyz[i][j]=float(xyz_read[j])
-            if coord_direct:
-               self.xyz[i][0]=self.xyz[i][0]*xlen
-               self.xyz[i][1]=self.xyz[i][1]*ylen
-               self.xyz[i][2]=self.xyz[i][2]*zlen
-
+            if line_split[0] == "Cartesian":
+               coord_direct = False
+            elif line_split[0] == "Direct":
+               coord_direct = True
+            for i in range(self.natoms):
+               line = infile.readline().rstrip("\n")
+               xyz_read = line.rstrip().split()[0:3]
+               for j in range(3):
+                  self.xyz[i][j]=float(xyz_read[j])
+               if coord_direct:
+                  self.xyz[i][0]=self.xyz[i][0]*xlen
+                  self.xyz[i][1]=self.xyz[i][1]*ylen
+                  self.xyz[i][2]=self.xyz[i][2]*zlen
+ 
 
    # Remove periodicity from atoms, move molecule near to origin
-      if coord_direct:
+         if coord_direct:
          
-         for i in range(self.natoms):
-            if self.xyz[i][0] > xlen*0.78:
-               self.xyz[i][0]=(self.xyz[i][0]-xlen)
-            if self.xyz[i][1] > ylen*0.78:
-               self.xyz[i][1]=(self.xyz[i][1]-ylen)
-            if self.xyz[i][2] > zlen*0.78:
-               self.xyz[i][2]=(self.xyz[i][2]-zlen)
+            for i in range(self.natoms):
+               if self.xyz[i][0] > xlen*0.78:
+                  self.xyz[i][0]=(self.xyz[i][0]-xlen)
+               if self.xyz[i][1] > ylen*0.78:
+                  self.xyz[i][1]=(self.xyz[i][1]-ylen)
+               if self.xyz[i][2] > zlen*0.78:
+                  self.xyz[i][2]=(self.xyz[i][2]-zlen)
+#
+#    B: diatomic molecule: place it along the x axis, first atom at
+#       origin, second atom at x+bond length
+#       Take bond length from diatomic dictionary and atom symbols 
+#       from single_atom dictionary
+#  
+      elif self.type == "diatomic":
+          coord_direct = False
+          self.natoms = 2
+          self.xyz = np.zeros((self.natoms,3))
+          self.xyz[0][0] = 0.0
+          self.xyz[0][1] = 0.0
+          self.xyz[0][2] = 0.0
+          self.xyz[1][0] = diatomic_dict[self.spec]
+          self.xyz[1][1] = 0.0
+          self.xyz[1][2] = 0.0
+          self.names=[]
+          self.elements=[]
+          self.elem_num=[]
+#    Determine the elements from the species identifier!
+          names_tmp = self.spec.split("-")
+#    Homolytic bond (both elements identical)
+          if names_tmp[0] == names_tmp[1]:
+             self.nelem=1
+             self.elements.append(single_atom_dict[names_tmp[0]])
+             self.names.append(self.elements[0])
+             self.names.append(self.elements[0])
+             self.elem_num.append(2)
+#    Heterolytic bond (two different elements)
+          else: 
+             self.nelem=2
+             self.elements.append(single_atom_dict[names_tmp[0]])
+             self.elements.append(single_atom_dict[names_tmp[1]])
+             self.names.append(self.elements[0])
+             self.names.append(self.elements[1])
+             self.elem_num.append(1)
+
+#
+#    C: single atom: place it at the origin
+#
+      elif self.type == "atom":
+          coord_direct = False
+          self.natoms = 1
+          self.xyz = np.zeros((self.natoms,3))
+          self.xyz[0][0] = 0.0
+          self.xyz[0][1] = 0.0
+          self.xyz[0][2] = 0.0
+          self.nelem = 1
+          self.names=[]
+          self.elements=[]
+          self.elem_num=[]
+          self.elem_num.append(1)
+          self.elements.append(single_atom_dict[self.spec])
+          self.names.append(single_atom_dict[self.spec])
+
 
 #
 #   Calculate the center of mass (COM) of a molecule
@@ -664,14 +852,28 @@ with surface_in as infile:
 
 # Now read in the structure of ionic liquid molecules 
 # The user can select from a predefined library of molecules for that purpose
+
+print(" Three different kinds of adsorbates can be placed on the surfaces:")
+
    
-print(" List of available adsorbate molecules (with No. and shortcut):")
+print(" A) Adsorbate molecules (with shortcut):")
 for i in range (adsorb_num):
-    print(" -(" + str(i+1) +" / " + mol_short[i] + ")  --  "+ mol_names[i])
+    print(" -(" + mol_short[i] + ")  --  "+ mol_names[i])
 
 print(" ")
-print(" -(99)- Individual molecule (POSCAR_ads in current folder)")
-print(" -(100)- Individual molecule (POSCAR_ads2 in current folder)")
+
+print(" B) Atoms (all to Rn) (shortcut: small element symbol, e.g., h or ni):")
+
+print(" ")
+
+print(" C) Diatomic molecules (shortcuts: e.g., h-h or c-o):")
+print("  bond lengths taken from https://cccbdb.nist.gov/diatomicexpbondx.asp" )
+print("  Currently implemented molecules are:")
+print("   H2, Li2, Be2, B2, C2, N2, I2, F2, Ne2, Na2, Mg2, Al2, Si2, P2,")
+print("   S2, Cl2, Ar2, K2, Cu2, As2, Se2, Br2, Te2, I2, HLi, HBe, BH, ")
+print("   CH, NH, OH, FH, LiO, BeO, BeF, BC, BN, BF, CN, NO, NF, CO, ")
+print("   OF, HCl, HBr, HI")
+
 print(" ")
 
 nspecs=0
@@ -710,15 +912,32 @@ all_mols = []
 for line in (IL_lines):
    pos_read = line.rstrip().split()[0:7]
 #
-#    Both read in variants: direct index or over name shortcut
+#    Read in string shortcut and find out if its a molecule, a diatomic 
+#     or a single atom
 #
-   try:
-      IL_spec = (int(pos_read[0]))
-   except ValueError:
-      IL_spec = mol_short.index(str(pos_read[0]))+1 
+#   try:
+#      IL_spec = (int(pos_read[0]))
+#   except ValueError:
+   IL_spec = str(pos_read[0]) # mol_short.index(str(pos_read[0]))+1 
 
-   if IL_spec <= 0 or IL_spec > adsorb_num and IL_spec != 99 and IL_spec != 100:
-      print("Error! Only indices between 1 and " + str(adsorb_num) + " (or 99 and 100) allowed!")    
+#   Which of the three species types the current species is 
+   spec_type = ""
+#   Check if a molecule is present
+   try:
+      test_string = adsorbate_dict[IL_spec]
+      spec_type = "large"
+   except KeyError:
+      try: 
+         test_string = diatomic_dict[IL_spec]
+         spec_type = "diatomic"
+      except KeyError:
+         try: 
+            test_string = single_atom_dict[IL_spec]
+            spec_type = "atom"
+         except KeyError:
+            print(" build_adsorbate.py does not know the species ",IL_spec,"!")
+            sys.exit(1)      
+
 
    IL_xpos0 = (float(pos_read[1]))
    IL_ypos0 = (float(pos_read[2]))
@@ -738,7 +957,7 @@ for line in (IL_lines):
       IL_xpos0 = IL_xpos0 + ran.uniform(-0.5, 0.5)
       IL_ypos0 = IL_ypos0 + ran.uniform(-0.5, 0.5)
 
-   mol_act = IL_Molecule(IL_spec, IL_xpos0, IL_ypos0, IL_surf_dist, IL_prec, IL_nut, IL_rot)
+   mol_act = IL_Molecule(IL_spec, spec_type, IL_xpos0, IL_ypos0, IL_surf_dist, IL_prec, IL_nut, IL_rot)
 
    all_mols.append(mol_act)
 
@@ -753,17 +972,9 @@ else :
 
    for m in range(nspecs): 
 # Read in the first molecule from its POSCAR in the build_scill_input folder
-   
-# First, read in the POSCAR file for the metal surface
-      if all_mols[m].spec-1 == 98:
-         mol_name="POSCAR_ads"
-      elif all_mols[m].spec-1 == 99:
-         mol_name="POSCAR_ads2" 
-      else:   
-         mol_name=mol_short[all_mols[m].spec-1]
 
 # Call subroutine for read in of the molecule
-      all_mols[m].ReadMolecule(mol_name)
+      all_mols[m].ReadMolecule()
 
 
 # Now rotate molecule to inertia axis frame, in order to be capable 
@@ -1048,14 +1259,14 @@ sys.stdout=original_stdout
 
 # Build the POTCAR file automatically by concatenating the single 
 # element POTCAR files, remove old one if necessary
-os.system("rm POTCAR")
-os.system("touch POTCAR")
-for elem in elements_all:
-   os.system("cat " + potcar_path + elem + "/POTCAR >> POTCAR")
+#os.system("rm POTCAR")
+#os.system("touch POTCAR")
+#for elem in elements_all:
+#   os.system("cat " + potcar_path + elem + "/POTCAR >> POTCAR")
  
 print('''
    build_adsorbate.py has succesfully finished!
-   Positions written to POSCAR, PAW potentials written to POTCAR.
+   Positions written to POSCAR.
    Test xyz structure written to system_full.xyz.
    ''')
 if zonly:
