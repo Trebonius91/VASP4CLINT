@@ -339,9 +339,9 @@ else if (ispin .eq. 2) then
 end if
 do i=1,npoints
    if (ispin .eq. 1) then
-      write(30,*) e_dos(i),dos_tot(i)
+      write(30,*) e_dos(i)-efermi,dos_tot(i)
    else if (ispin .eq. 2) then
-      write(30,*) e_dos(i),dos_tot_up(i),dos_tot_down(i)
+      write(30,*) e_dos(i)-efermi,dos_tot_up(i),dos_tot_down(i)
    end if
 end do
 close(30)
@@ -369,6 +369,7 @@ do i=1,natoms
    end if
    do j=1,npoints
       read(29,*,iostat=readstat) fdum,dos_partial(i,j,:)
+      dos_partial(i,j,:)=abs(dos_partial(i,j,:))
       if (readstat .ne. 0) then
          stop "Missing data in DOSCAR? Did you add the LORBIT=11 keyword?"
       end if
@@ -390,7 +391,6 @@ else if (ispin .eq. 2) then
    dos_part_out_up=0.d0
    dos_part_out_down=0.d0
 end if
-
 
 do i=1,natoms
    act_read=.false.
@@ -422,16 +422,25 @@ do i=1,natoms
             end if
          else if (ispin .eq. 2) then
             if (orb_all) then
-               dos_part_out(j)=dos_part_out(j)+sum(dos_partial(i,j,:))
+               do k=1,9     
+                  dos_part_out_up(j)=dos_part_out_up(j)+dos_partial(i,j,k*2-1)
+                  dos_part_out_down(j)=dos_part_out_down(j)+dos_partial(i,j,k*2)
+               end do 
             else
+!
+!     The upspin component
+!
                do k=1,9
                   if (orb_used(k)) then 
-                     dos_part_out(j)=dos_part_out(j)+dos_partial(i,j,k)
+                     dos_part_out_up(j)=dos_part_out_up(j)+dos_partial(i,j,k*2-1)
                   end if
                end do
-               do k=10,18
-                  if (orb_used(k-9)) then
-                     dos_part_out(j)= dos_part_out(j)+dos_partial(i,j,k)
+!
+!     The downspin component
+!
+               do k=1,9
+                  if (orb_used(k)) then
+                     dos_part_out_down(j)=dos_part_out_down(j)+dos_partial(i,j,k*2)
                   end if
                end do
             end if
@@ -441,10 +450,18 @@ do i=1,natoms
 end do
 
 write(*,*) " ...  success!"
-if (sum(dos_part_out) .lt. 0.0001d0) then
-   write(*,*)
-   write(*,*) "The partial DOS is zero! Maybe no valid element or index chosen?"
-   write(*,*)
+if (ispin .eq. 1) then
+   if (sum(dos_part_out) .lt. 0.0001d0) then
+      write(*,*)
+      write(*,*) "The partial DOS is zero! Maybe no valid element or index chosen?"
+      write(*,*)
+   end if
+else if (ispin .eq. 2) then
+   if (sum(dos_part_out_up) .lt. 0.0001d0) then
+      write(*,*)
+      write(*,*) "The partial DOS is zero! Maybe no valid element or index chosen?"
+      write(*,*)
+   end if
 end if
 !
 !     Write the partial DOS to a file 
