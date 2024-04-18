@@ -48,6 +48,12 @@ print('''
  -dist_cut=[value]: Desired distance to adsorbate atoms below which atoms
    of the surface are removed for being too near (for -cutout active)
    (default value: 2.0)
+ -fix_frac=[value}: Desired lower fraction of the surface to be hold 
+   fixed (F F F) in the combined structure. Example: if the surface is 
+   five layers deep and the lowest two shall be held fixed, set the 
+   value to 0.4 or 0.42 (lowest 40% or 42%). Lower end of the surface 
+   is always assumed as z=0.0!
+   (default value: 0.55)
  The list of molecules will be read in from file 'adsorb_list.dat'
  The format shall be: [Species shortcut] [x-coord] [y-coord] 
  [dist mol-surf(z)] [prec.] [nut.] [rot.] (angles given in degrees)"
@@ -66,6 +72,9 @@ mol_path="/home/jsteffen/work/build_adsorbates_input/"
 # The path where the POTCAR files for the elements are located
 potcar_path = "/scratch/potcar/PAW_PBE.52/"
 
+# The standard fraction of the surface, which shall be hold fixed 
+#(the lower ...*100 percent)
+fix_frac=0.55
 
 # lists of available ionic liquids
 mol_names = [] 
@@ -392,7 +401,11 @@ if len(sys.argv) > 1:
       if arg[0:10] == "-dist_cut=":
           dist_remove = float(arg[10:])
           print("Distance for surface atom removal changed to " + str(dist_remove) + " A.")
-
+# Read in the fraction of surface atoms (with respect to the z-axis) that shall be 
+# held fixed (lower ...*100 percent)
+      if arg[0:10] == "-fix_frac=":
+          fix_frac = float(arg[10:])
+          print("Lower fraction of the surface to be held fixed " + str(fix_frac) )
 
 # Predefine the writing POSCAR flags for selective dynamics
 if zonly:
@@ -1013,11 +1026,12 @@ else :
    
 
 
-# Allocate the lowest 40% of surface atoms (lowest 2 layers in the case of 5 layers)
-# to fixed atoms 
+# Allocate the lowest fix_frac*100 percent of surface atoms
+# to fixed atoms (e.g., fix_frac = 0.4: lowest 40% fixed)
    surf_fixed=[]
+   surf_zmin=0.0  # assume lower end of the surface at z=0
    for i in range(natoms_surf):
-      if xyz_surf2[i][2] <= (surf_zmax-surf_zmin)*0.4:
+      if xyz_surf2[i][2] <= (surf_zmax-surf_zmin)*fix_frac:
          surf_fixed.append(True)
       else:
          surf_fixed.append(False)
