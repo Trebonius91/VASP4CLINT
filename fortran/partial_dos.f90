@@ -347,6 +347,22 @@ end do
 close(30)
 write(*,*) "Total DOS of the system written to file 'dos_total.dat'."
 
+!
+!    If spin polarization is present, write an averaged DOS 
+!     (e.g., for effective calculation of DOS overlaps)
+!
+if (ispin .eq. 2) then
+   open(unit=30,file="dos_tot_sum.dat",status="replace")
+   write(30,*) "# DOS calculated by partial_dos (alpha and beta summed up) "
+   write(30,*) "# Fermi energy has been subtracted (E_fermi = ",efermi," eV)"
+   write(30,*) "#   energy(eV)             DOS"
+   do i=1,npoints
+      write(30,*) e_dos(i)-efermi,dos_tot_up(i)+dos_tot_down(i)
+   end do 
+   close(30)
+   write(*,*) "Summed total DOS (alpha+beta) written to file 'dos_tot_sum.dat'."
+end if
+        
 if (el_all .and. orb_all) then
    write(*,*)
    write(*,*) "All atoms and all orbitals are chosen, the partial DOS will be skipped."
@@ -484,6 +500,22 @@ do i=1,npoints
 end do
 close(30)
 write(*,*) "Partial DOS of the system written to file 'dos_partial.dat'."
+
+!
+!    If spin polarization is present, write an averaged DOS 
+!     (e.g., for effective calculation of DOS overlaps)
+!
+if (ispin .eq. 2) then
+   open(unit=30,file="dos_part_sum.dat",status="replace")
+   write(30,*) "# DOS calculated by partial_dos (alpha and beta summed up) "
+   write(30,*) "# Fermi energy has been subtracted (E_fermi = ",efermi," eV)"
+   write(30,*) "#   energy(eV)             DOS"
+   do i=1,npoints
+      write(30,*) e_dos(i)-efermi,dos_part_out_up(i)+dos_part_out_down(i)
+   end do
+   close(30)
+   write(*,*) "Summed partial DOS (alpha+beta) written to file 'dos_part_sum.dat'."
+end if 
 
 22 continue
 write(*,*)
