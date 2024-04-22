@@ -1163,7 +1163,9 @@ allocate(final_choice(maxval(nbasis),nelems))
 
 num_around=0
 rdf_all=0.d0
-adf_all=0.d0
+if (.not. no_adf) then
+   adf_all=0.d0
+end if
 write(*,*) "Total number of atoms (possible basis functions):",natoms_sum
 write(34,*) "Total number of atoms (possible basis functions):",natoms_sum
 
@@ -1343,11 +1345,13 @@ close(57)
 !
 !     Test write out angular distribution functions
 !
-open(unit=58,file="adf_test.dat",status="replace")
-do i=1,ngrid
-   write(58,*) i*da,adf_all(i,1:5)
-end do
-close(58)
+if (.not. no_adf) then
+   open(unit=58,file="adf_test.dat",status="replace")
+   do i=1,ngrid
+      write(58,*) i*da,adf_all(i,1:5)
+   end do
+   close(58)
+end if
 
 write(*,*) "Select reference confs. based on largest gradient norms..."
 write(34,*) "Select reference confs. based on largest gradient norms..."
