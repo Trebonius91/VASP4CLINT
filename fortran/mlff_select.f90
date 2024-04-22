@@ -125,6 +125,7 @@ integer,allocatable::trans_conf(:)  ! translation from old to new configuraiton 
 integer,allocatable::confbas_final(:,:)  ! the final list of confs. for each basis func
 integer::mat_coord(2)  ! the current matrix indices
 logical::eval_stat(10)  ! the progress for evaluation loops
+logical::no_adf  ! if no angular distribution functions shall be calculated
 logical,allocatable::atom_used(:)  ! boolean mask for blocking of treated atoms
 !   for time measurement
 character(8)  :: date
@@ -192,6 +193,9 @@ do i = 1, command_argument_count()
       write(*,*) "    will be chosen based on different number of neighbor atoms,"
       write(*,*) "    such that the tails of the neighbor distribution will be "
       write(*,*) "    weighted larger (larger diversity). DEFAULT: 0.1"
+      write(*,*) " -rdf_only : Deactivates the calculation of ADF profiles, only RDF"
+      write(*,*) "    is used for environment comparisons. Recommended for large "
+      write(*,*) "    cutoff distances, where calculations get a huge speedup."
       write(*,*) " -rdf2adf=[value] : Relative weighting of radial distribution "
       write(*,*) "    function (RDF) and angular distribution function (ADF) overlap"
       write(*,*) "    in constructing the clustering matrices. Example: -rdf2adf=2.0:"
@@ -414,6 +418,17 @@ if (train_div .lt. 0.0 .or. train_div .gt. 1.0) then
    write(34,*)
    stop
 end if
+!
+!     Deactivates the calculation of ADFs in order to accelerate the calculation
+!
+no_adf=.false.
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:9))  .eq. "-rdf_only") then
+      no_adf = .true.      
+   end if
+end do
+
 !
 !     Relative weight of RDF and ADF overlaps for the construction of 
 !      the clustering matrices
@@ -667,6 +682,11 @@ end if
 write(*,'(a,f10.4,a)') " The ML_FF descriptor cutoff is ",cutoff," Angstrom."
 write(*,'(a,f10.4,a)') " ",grad_frac*100d0," % of basis functions allocated for large gradients."
 write(*,'(a,f10.4,a)') " ",train_div*100d0," % of basis functions allocated uniformly."
+if (no_adf) then
+   write(*,*) "No ADF will be calculated! (-rdf_only activated)"
+   rdf_weight=1.0
+   adf_weight=0.d0
+end if       
 write(*,'(a,f8.3,a,f8.3,a)') " Weighting of overlap matrices: ",rdf_weight*100d0, &
                    & " % RDF, ",adf_weight*100d0," % ADF."
 write(*,'(a,i5)') " Number of neighborhood classes per environment & 
@@ -674,6 +694,9 @@ write(*,'(a,i5)') " Number of neighborhood classes per environment &
 write(34,'(a,f10.4,a)') " The ML_FF descriptor cutoff is ",cutoff," Angstrom."
 write(34,'(a,f10.4,a)') " ",grad_frac*100d0," % of basis functions allocated for large gradients."
 write(34,'(a,f10.4,a)') " ",train_div*100d0," % of basis functions allocated uniformly."
+if (no_adf) then
+   write(34,*) "No ADF will be calculated! (-rdf_only activated)"
+end if
 write(34,'(a,f8.3,a,f8.3,a)') " Weighting of overlap matrices: ",rdf_weight*100d0, &
                    & " % RDF, ",adf_weight*100d0," % ADF."
 write(34,'(a,i5)') " Number of neighborhood classes per environment & 
@@ -1117,7 +1140,9 @@ allocate(dist_list(max_environ))
 !     The radial distribution functions around all atoms
 allocate(rdf_all(ngrid,natoms_sum))
 !     The angular distribution functions around all atoms
-allocate(adf_all(ngrid,natoms_sum))
+if (.not. no_adf) then        
+   allocate(adf_all(ngrid,natoms_sum))
+end if
 !     The local list of angles in the environment
 allocate(angles(max_environ*max_environ))
 !     The global histogram with the number of neighbors
@@ -1251,29 +1276,30 @@ do i=1,conf_num
 
 !
 !     Generate angular distribution function for current environment
-!     
-      angles=0.d0
-      inc3=1
-      do k=2,inc2-1
-         do l=k+1,inc2-1
-            angles(inc3)=acos(dot_product(environ(:,k,inc),environ(:,l,inc))/&
-                            &sqrt(dist_list(k-1)**2*dist_list(l-1)**2))*180d0/pi 
-            inc3=inc3+1        
+!  
+      if (.not. no_adf) then
+         angles=0.d0
+         inc3=1
+         do k=2,inc2-1
+            do l=k+1,inc2-1
+               angles(inc3)=acos(dot_product(environ(:,k,inc),environ(:,l,inc))/&
+                               &sqrt(dist_list(k-1)**2*dist_list(l-1)**2))*180d0/pi 
+               inc3=inc3+1        
+            end do
+         end do  
+         normfac=0.d0 
+         do k=1,ngrid
+            x_act=k*da        
+            do l=1,inc3-1
+               adf_all(k,inc)=adf_all(k,inc)+exp(-alpha_a*(x_act-angles(l))**2)
+            end do
+            normfac=normfac+adf_all(k,inc)*adf_all(k,inc)*da
          end do
-      end do  
-      normfac=0.d0 
-      do k=1,ngrid
-         x_act=k*da        
-         do l=1,inc3-1
-            adf_all(k,inc)=adf_all(k,inc)+exp(-alpha_a*(x_act-angles(l))**2)
-         end do
-         normfac=normfac+adf_all(k,inc)*adf_all(k,inc)*da
-      end do
 !
 !     Normalize its integral to become 1
 !
-      adf_all(:,inc)=adf_all(:,inc)/sqrt(normfac)
-
+         adf_all(:,inc)=adf_all(:,inc)/sqrt(normfac)
+      end if
    end do
 end do
 write(*,*) " ... finished!"
@@ -1730,10 +1756,12 @@ do i=1,nelems
                               & rdf_all(m,basis_classes(l,j))*dx
                end do
                adf_overlap=0.d0
-               do m=1,ngrid
-                  adf_overlap=adf_overlap+adf_all(m,basis_classes(k,j))* &
+               if (.not. no_adf) then
+                  do m=1,ngrid
+                     adf_overlap=adf_overlap+adf_all(m,basis_classes(k,j))* &
                               & adf_all(m,basis_classes(l,j))*da                
-               end do
+                  end do
+               end if
 !
 !     Weight the RDF and ADF overlaps according to the value given within
 !      the -rdf2adf command
