@@ -23,7 +23,8 @@ integer::nbasis(50)  ! desired number of local refs. in new ML_AB
 integer::nbasis_tmp(50)  ! for resorting of nbasis array, if needed
 integer::neigh_min_bas(50)  ! minimum number of confs. per neighbor bin
 integer::nbas_grad(50)  ! number of basis functions for max.  gradient comps
-integer::neigh_classes ! number of neighborhood subdivision classes
+integer::neigh_classes ! number of neighborhood subdivision classes (calculated)
+integer::neigh_maxsize ! maximum number of basis functions per neigh_class (input)
 integer::grad_pre(50)    ! number of basis functions for large gradnorms
 integer::conf_num  ! number of configurations (full structures)
 integer::act_conf   ! the current configuration number
@@ -56,6 +57,7 @@ real(kind=8)::normfac   ! normalizaion factor for RDFs and ADFs
 real(kind=8)::rdf_adf   ! relative weighting of RDF and ADFs in clustering
 real(kind=8)::rdum   ! dummy real number
 integer,allocatable::inds(:,:)  ! the element indices (core charges)
+integer,allocatable::natoms_el(:)  ! total number of atoms per element
 integer::ind_list_loc(50,20)   ! local list of different element indices
 integer::ind_list(50)    ! global list of different element indices
 character(len=2),allocatable::el_list_confs(:,:)  ! List of elements in all confs.
@@ -113,6 +115,8 @@ integer,allocatable::final_choice(:,:)  ! the final selection of basis functions
 integer,allocatable::trans_final(:)  ! for local reordering of final selection
 integer,allocatable::atsel_grad(:,:)  ! the atom indices of the largest gradnorms
 integer,allocatable::neighnum_global(:)  ! sum of all neighbors for all atoms
+integer,allocatable::natoms_neigh(:) ! number of atoms per neighborhood number
+integer,allocatable::nbasis_neigh(:)  ! number of basis functions per neighborhood number
 integer,allocatable::neigh_div1(:,:),neigh_div2(:,:)  ! the neighborhood diversities
 integer,allocatable::basis_sizes(:)  ! sizes of all basis classes (per element)
 integer,allocatable::bas_neighs(:)  ! total number of neighbors per class
@@ -200,10 +204,11 @@ do i = 1, command_argument_count()
       write(*,*) "    function (RDF) and angular distribution function (ADF) overlap"
       write(*,*) "    in constructing the clustering matrices. Example: -rdf2adf=2.0:"
       write(*,*) "    RDF will have 66% weight, ADF 33% (2 to 1). DEFAULT: 1.0"
-      write(*,*) " -neigh_classes=[number] : Number of diversity-based neighborhood"
-      write(*,*) "    classes (per number of atoms in the environment, the number"
-      write(*,*) "    subdivisions, sorted by the diversity (respect to elements)"
-      write(*,*) "    of the neighborhoods. DEFAULT: 50"
+      write(*,*) " -neigh_basmax=[number] : Maximum number of basis functions allocated"
+      write(*,*) "    to a neighborhood diversity class. A larger number will increase"
+      write(*,*) "    the amount of k-means clustering and slow down the calculation. "
+      write(*,*) "    A smaller number might harm the diversity of the chosen basis "
+      write(*,*) "    functions. DEFAULT: 10"
       write(*,*) " -bas_scale=('linear' or 'root') : How the number of basis functions"
       write(*,*) "    allocated to a certain neighborhood class shall scale with"
       write(*,*) "    the number of atoms contained into it."
@@ -460,28 +465,28 @@ adf_weight=1.d0/(rdf_adf+1.d0)
 !
 !     The number of neighborhood classes
 !
-neigh_classes=50
+neigh_maxsize=10
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
-   if (trim(arg(1:15))  .eq. "-neigh_classes=") then
-      read(arg(16:),*,iostat=readstat) neigh_classes
+   if (trim(arg(1:15))  .eq. "-neigh_basmax=") then
+      read(arg(16:),*,iostat=readstat) neigh_maxsize
       if (readstat .ne. 0) then
-         write(*,*) "The format of the -neigh_classes=[number] command seems to be corrupted!"
+         write(*,*) "The format of the -neigh_baxmax=[number] command seems to be corrupted!"
          write(*,*)
-         write(34,*) "The format of the -neigh_classes=[number] command seems to be corrupted!"
+         write(34,*) "The format of the -neigh_basmax=[number] command seems to be corrupted!"
          write(34,*)
          stop
       end if
    end if
 end do
-if (neigh_classes .lt. 1) then
-   write(*,*) "Please give the number of neighborhood classes based on their element "
-   write(*,*) " diversities with the keyword -neigh_classes=[number], where the number"
-   write(*,*) " of classes must be 1 (no subdividing) or larger."
+if (neigh_maxsize .lt. 1) then
+   write(*,*) "Please give the maximum number of basis functions allocated to a "
+   write(*,*) " neighborhood diversity class, must be larger than 2, but should not "
+   write(*,*) " be too large (smaller than 20-30)!"
    write(*,*)
-   write(34,*) "Please give the number of neighborhood classes based on their element "
-   write(34,*) " diversities with the keyword -neigh_classes=[number], where the number"
-   write(34,*) " of classes must be 1 (no subdividing) or larger."
+   write(34,*) "Please give the maximum number of basis functions allocated to a "
+   write(34,*) " neighborhood diversity class, must be larger than 2, but should not "
+   write(34,*) " be too large (smaller than 20-30)!"
    write(34,*)
    stop
 end if
@@ -712,13 +717,17 @@ end if
 write(*,'(a,i6)') " Maximum number of atoms within the cutoff of any atom: ",max_environ
 write(*,'(a,i8)') " Number of grid points for RDF/ADF overlap integrations: ",ngrid
 write(*,'(a,f10.4)') " Exponential prefactor for RDF line broadening: ",alpha_r
-write(*,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
+if (.not. no_adf) then
+   write(*,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
+end if
 write(*,*) "--------------------------------------------------"
 write(*,*)
 write(34,'(a,i6)') " Maximum number of atoms within the cutoff of any atom: ",max_environ
 write(34,'(a,i8)') " Number of grid points for RDF/ADF overlap integrations: ",ngrid
 write(34,'(a,f10.4)') " Exponential prefactor for RDF line broadening: ",alpha_r
-write(34,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
+if (.not. no_adf) then
+   write(34,'(a,f10.4)') " Exponential prefactor for ADF line broadening: ",alpha_a
+end if
 write(34,*) "--------------------------------------------------"
 write(34,*)
 flush(34)
@@ -1313,6 +1322,7 @@ write(34,*)
 write(34,*) " Element   No. of atoms       Basis size       atom usage (%)"
 flush(34)
 
+allocate(natoms_el(nelems))
 do i=1,nelems
    inc=0
    do j=1,natoms_sum
@@ -1320,6 +1330,7 @@ do i=1,nelems
          inc=inc+1
       end if        
    end do
+   natoms_el(i)=inc
    write(*,'(3a,i10,a,i10,a,f12.6)') "   ", el_list_glob(i)," : ",inc, "         ",nbasis(i), &
                   & "          ",real(real(nbasis(i))/real(inc)*100.d0)
    write(34,'(3a,i10,a,i10,a,f12.6)') "   ", el_list_glob(i)," : ",inc, "         ",nbasis(i), &
@@ -1548,6 +1559,168 @@ do i=1,nelems
       end if
    end do
 !
+!    First determine number of neighborhood diversity classes such that the 
+!    maximum number of basis functions to be clustered in one of the classes 
+!    it not larger than the given threshold in order to keep the calculation effort
+!    manageable
+! 
+!    BEGIN OF NEIGH_CLASSES CALCULATION
+!
+   if (allocated(basis_sizes)) deallocate(basis_sizes)
+   if (allocated(basis_classes)) deallocate(basis_classes)
+   if (allocated(neigh_div1)) deallocate(neigh_div1)
+   if (allocated(neigh_div2)) deallocate(neigh_div2)
+   if (allocated(bas_neighs)) deallocate(bas_neighs)
+!
+!    Similar to below, but now with neigh_classes=1 (total number per environment)
+!
+   allocate(basis_sizes(inc*1+1))
+   allocate(bas_neighs(inc*1+1))
+   allocate(basis_classes(maxval(neigh_global-neigh_bas),inc*1+1))
+   allocate(neigh_div1(2,maxval(neigh_global-neigh_bas)))
+   allocate(neigh_div2(2,maxval(neigh_global-neigh_bas)))
+   remain_class=inc*1+1
+   inc_remain=0
+   basis_sizes=0
+   basis_classes=0
+
+!
+!    Calculate basis function numbers per total environment class, without subdivision
+!
+   inc=0
+   do j=1,max_environ
+      neigh_div1=1
+      neigh_div2=1
+      inc=0
+      do k=1,natoms_sum
+         if (atom_used(k) .and. (ind_all(k) .eq. ind_list(i))) then
+            if (neighnum_global(k) .eq. j) then
+               inc=inc+1
+               neigh_div1(1,inc)=k
+               do l=1,nelems
+                  if (num_around(l,k) .gt. 0) then
+                     neigh_div1(2,inc)=neigh_div1(2,inc)*num_around(l,k)
+                  end if
+               end do
+            end if     
+         end if 
+      end do
+!
+!    Second, sort the array with the surroundings
+!
+      do k=1,inc
+         inc2=maxloc(neigh_div1(2,1:inc),dim=1)
+         neigh_div2(:,k)=neigh_div1(:,inc2)
+         neigh_div1(:,inc2)=1 
+      end do
+!
+!    Third, allocate the atoms into the neighborhood class, and with this 
+!    into the final cluster for the k-means clustering!
+! 
+      if (inc .gt. 0) then
+         inc3=inc3+1
+         inc4=0
+         do k=1,1-1
+            if ((inc/1) .lt. 10) then
+               basis_sizes(remain_class)=basis_sizes(remain_class)+inc/1
+               bas_neighs(remain_class)=max_environ+1
+            else
+               basis_sizes((inc3-1)*1+k)=inc/1  
+               bas_neighs((inc3-1)*1+k)=j
+            end if
+            if ((inc/1) .lt. 10) then
+               do l=1,inc/1
+                  inc4=inc4+1
+                  inc_remain=inc_remain+1
+                  basis_classes(inc_remain,remain_class)=neigh_div2(1,inc4)
+               end do
+            else 
+               do l=1,inc/1
+                  inc4=inc4+1
+                  basis_classes(l,(inc3-1)*1+k)=neigh_div2(1,inc4)
+               end do 
+            end if
+         end do  
+         if ((inc-inc4) .lt. 10) then 
+            basis_sizes(remain_class)=basis_sizes(remain_class)+inc-inc4
+            bas_neighs(remain_class)=max_environ+1
+         else
+            basis_sizes(inc3*1)=inc-inc4
+            bas_neighs(inc3*1)=j
+         end if
+         if ((inc-inc4) .lt. 10) then
+            do l=1,inc-inc4
+               inc4=inc4+1
+               inc_remain=inc_remain+1
+               basis_classes(inc_remain,remain_class)=neigh_div2(1,inc4)
+            end do            
+         else
+            do l=1,basis_sizes(inc3*1)
+               inc4=inc4+1
+               basis_classes(l,inc3*1)=neigh_div2(1,inc4)
+            end do
+         end if
+      end if
+   end do
+!
+!    Fourth, determine the number of available spots in the final basis set
+!     for the different local environment diversity classes  
+!
+!     Total number of available spots
+!
+   spots_avail=nbasis(i)-grad_pre(i)-neigh_min_bas(i)
+!
+!     The first index to add an atom to the global basis function list
+!
+   inc_atom=nbasis(i)-spots_avail+1
+!
+!     Array with number of spots per neighbor subclass
+!
+   if (allocated(k_number)) deallocate(k_number)
+   allocate(k_number(size(basis_sizes)))
+!
+   do j=1,size(basis_sizes)
+      if (bas_scale .eq. "linear") then
+         inc=inc+basis_sizes(j)
+      else if (bas_scale .eq. "root") then
+         inc=inc+int(sqrt(real(basis_sizes(j))))
+      end if
+   end do
+
+!
+!     Determine the numbers
+!   
+   do j=1,size(basis_sizes)
+!
+!     Linear scaling with number of atoms
+!
+      if (bas_scale .eq. "linear") then
+         k_number(j)=nint(real(basis_sizes(j))/real(inc)*real(spots_avail))
+!
+!     Square root scaling with number of atoms
+!
+      else if (bas_scale .eq. "root") then
+         k_number(j)=nint(sqrt(real(basis_sizes(j)))/real(inc)*real(spots_avail))
+
+      end if
+   end do
+   neigh_classes=ceiling(real(maxval(k_number))/real(neigh_maxsize))
+   write(*,'(a,i5,a)') " (Number of neighborhood diversity classes: ",neigh_classes,")"
+! 
+!    END OF NEIGH_CLASSES CALCULATION
+!
+!
+!     Number of available basis functions:
+!
+
+   inc=0
+   inc3=0
+   do j=1,max_environ
+      if ((neigh_global(i,j)-neigh_bas(i,j)) .gt. 0) then
+         inc=inc+1
+      end if
+   end do
+
 !    Allocate array with atom classes based on neighborhood size 
 !     and diversity     
 !
@@ -1556,6 +1729,8 @@ do i=1,nelems
    if (allocated(neigh_div1)) deallocate(neigh_div1)
    if (allocated(neigh_div2)) deallocate(neigh_div2)
    if (allocated(bas_neighs)) deallocate(bas_neighs)
+   if (allocated(natoms_neigh)) deallocate(natoms_neigh) 
+   if (allocated(nbasis_neigh)) deallocate(nbasis_neigh)
 !
 !     Add an extra dimension (+1) as remainder for all classes with less 
 !     then 10 atoms
@@ -1565,10 +1740,15 @@ do i=1,nelems
    allocate(basis_classes(maxval(neigh_global-neigh_bas),inc*neigh_classes+1))
    allocate(neigh_div1(2,maxval(neigh_global-neigh_bas)))
    allocate(neigh_div2(2,maxval(neigh_global-neigh_bas)))
+   allocate(natoms_neigh(max_environ+1))
+   allocate(nbasis_neigh(max_environ+1))
+
    remain_class=inc*neigh_classes+1
    inc_remain=0
    basis_sizes=0
    basis_classes=0
+   natoms_neigh=0
+   nbasis_neigh=0
 !
 !    Subdivide the number of neighbor bins into regions based on neighborhood
 !    diversity (how many of the different elements are within the neighborhood)
@@ -1593,6 +1773,7 @@ do i=1,nelems
             end if     
          end if 
       end do
+      natoms_neigh(j)=inc
 !
 !    Second, sort the array with the surroundings
 !
@@ -1678,13 +1859,13 @@ do i=1,nelems
 !
 !     Determine the numbers
 !   
+!   write(*,*) basis_sizes
    do j=1,size(basis_sizes)
 !
 !     Linear scaling with number of atoms
 !
       if (bas_scale .eq. "linear") then
          k_number(j)=nint(real(basis_sizes(j))/real(inc)*real(spots_avail))
-
 !
 !     Square root scaling with number of atoms
 !
@@ -1727,6 +1908,15 @@ do i=1,nelems
 !     number group and obtain final choice of atoms for basis set
 !
    do j=1,size(basis_sizes)
+      do k=1,max_environ+1
+         if (bas_neighs(j) .eq. k) then
+            natoms_neigh(k)=natoms_neigh(k)+basis_sizes(j)
+            nbasis_neigh(k)=nbasis_neigh(k)+k_number(j)
+         end if        
+      end do  
+   end do
+
+   do j=1,size(basis_sizes)
       if (allocated(mat_overlap)) deallocate(mat_overlap)
       allocate(mat_overlap(basis_sizes(j),basis_sizes(j)))
       if (allocated(hierarchy)) deallocate(hierarchy)
@@ -1736,10 +1926,14 @@ do i=1,nelems
          if (j .gt. 1) then
             if (bas_neighs(j) .ne. bas_neighs(j-1)) then
                if (j .eq. size(basis_sizes)) then
-                  write(*,*) " Cluster the remaining atoms ..."
+                  write(*,'(a,i8,a,i5,a)') " Cluster the remaining atoms (", &
+                            & natoms_neigh(bas_neighs(j))," atoms to ",nbasis_neigh(bas_neighs(j)), &
+                            & " basis functions) ..." 
                   write(34,*) " Cluster the remaining atoms ..."
                else
-                  write(*,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
+                  write(*,'(a,i5,a,i8,a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors (", &
+                            & natoms_neigh(bas_neighs(j))," atoms to ",nbasis_neigh(bas_neighs(j)), &
+                            & " basis functions) ..."
                   write(34,'(a,i5,a)') "  Cluster atoms with ",bas_neighs(j)," neighbors ..."
                end if         
                flush(34)
