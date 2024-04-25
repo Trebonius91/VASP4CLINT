@@ -27,6 +27,7 @@ character(len=2),allocatable::el_init(:),el_names(:),at_names(:)
 character(len=1),allocatable::selective(:,:)
 integer,allocatable::el_numbers(:),chunk_lens(:),at_moved(:)
 integer,allocatable::at_index(:)
+logical::nochunks  ! if no chunks are calculated but only one calculation
 real(kind=8)::cell_scale,cnvint
 real(kind=8)::potim,deltaxyz
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
@@ -59,6 +60,8 @@ write(*,*) "  chunk folders and sets them together and reconstructs the "
 write(*,*) "  global Hessian matrix and frequencies from them. Must be "
 write(*,*) "  started in the folder where all chunk folders are located,"
 write(*,*) "  together with a POSCAR file, where all moved atoms are 'T T T'"
+write(*,*) "  Alternatively, a single vasprun.xml of a whole calculation can"
+write(*,*) "  be placed in the main folder with the POSCAR file."
 write(*,*) "  usage: "
 write(*,*) "   split_freq -eval "
 
@@ -294,8 +297,11 @@ end if
 if (eval) then
 !
 !    Determine number of chunks: existence of highest folder
+!    If no chunks are present, try to read in a single vasprun.xml file
+!    from the main folder and read all data from it
 !
    ind=1
+   nochunks=.false.
    do
       if (ind .lt. 10) then
          write(foldername,'(a,i1)') "chunk",ind
@@ -310,15 +316,18 @@ if (eval) then
    end do
    nchunks=ind-1
    if (nchunks .lt. 2) then
-      write(*,*) "There need to be at least two chunk folders with vasprun.xml files!"
-      stop 
-   end if  
-   write(*,'(a,i4,a)') " In total, ",nchunks," frequency calculation chunks were performed." 
+      write(*,*) "No separate chunks have been calculated, the vasprun.xml file of the "
+      write(*,*) "  whole system will therefore be read in from the main folder."
+      nochunks=.true.
+   end if
+   if (.not. nochunks) then  
+      write(*,'(a,i4,a)') " In total, ",nchunks," frequency calculation chunks were performed." 
+   end if
 !
 !    Open the POSCAR file to determine the total number of atoms and which atoms were 
 !    moved during the frequency calculation
 !
-      
+
    open(unit=56,file="POSCAR",status="old",iostat=readstat)
    if (readstat .ne. 0) then
       write(*,*) "The POSCAR file could not been found!"
@@ -395,36 +404,37 @@ if (eval) then
    end do
    write(*,'(a,i8,a)') " The system contains ",natoms," atoms."
    write(*,'(a,i8,a)') " Of them, ",num_moved," atoms were activated for numerical frequencies."
+   if (.not. nochunks) then
 !
 !     Number of atoms per chunk (the last will get less work)
 !
-   workload=ceiling(real(num_moved)/real(nchunks))
-   do i=1,nchunks-1
-      chunk_lens(i)=workload
-      do j=1,workload
+      workload=ceiling(real(num_moved)/real(nchunks))
+      do i=1,nchunks-1
+         chunk_lens(i)=workload
+         do j=1,workload
+            do k=1,natoms
+               if (frozen_split(k,1)) then
+                  frozen_split(k,i+1) = .true.
+                  frozen_split(k,1) = .false.
+                  exit
+               end if
+            end do
+         end do
+      end do
+!
+!     The last chunk
+!
+      chunk_lens(nchunks)=num_moved-(nchunks-1)*workload
+      do j=1,num_moved-(nchunks-1)*workload
          do k=1,natoms
             if (frozen_split(k,1)) then
-               frozen_split(k,i+1) = .true.
+               frozen_split(k,nchunks+1) = .true.
                frozen_split(k,1) = .false.
                exit
             end if
          end do
       end do
-   end do
-!
-!     The last chunk
-!
-   chunk_lens(nchunks)=num_moved-(nchunks-1)*workload
-   do j=1,num_moved-(nchunks-1)*workload
-      do k=1,natoms
-         if (frozen_split(k,1)) then
-            frozen_split(k,nchunks+1) = .true.
-            frozen_split(k,1) = .false.
-            exit
-         end if
-      end do
-   end do
-   
+   end if
 !
 !    First read in the force vectors of all elongations (apart from the unchanged beginning)
 !
@@ -436,8 +446,123 @@ if (eval) then
    allocate(dipoles(3,6*num_moved))
    dipoles=0.d0
    write(*,*)
-   write(*,*) "Set all chunks together and construct the Hessian matrix..."
+   if (nochunks) then
+      write(*,*) "Read in the vasprun.xml file and construct the Hessian matrix..."
+   else    
+      write(*,*) "Set all chunks together and construct the Hessian matrix..."
+   end if
+! -------------------------------------------------------------------
+!     Read in the data from vasprun.xml if no chunks are present
+!
+   if (nochunks) then
+      open(unit=78,file="vasprun.xml",iostat=readstat)
+      if (readstat .ne. 0) then
+         write(*,*) "The vasprun.xml file in folder ",trim(foldername)," could not been found!"
+         stop
+      end if 
+      hit_act=0      
+      hit_act2=0
+      do
+         read(78,'(a)',iostat=readstat) line
+         if (readstat .ne. 0) exit
+!
+!    Leave current file if final positions have been reached
+!
+         if (index(line,'finalpos') .ne. 0) then
+            exit
+         end if
+                 
+!
+!    The force vectors for the elongations
+!
 
+         if (index(line,'forces') .ne. 0) then
+            hit_act=hit_act+1
+            if (hit_act .gt. 1) then     
+               force_act=force_act+1    
+               do j=1,natoms
+                  read(78,*) adum,force_vecs(:,j,force_act)
+               end do
+            end if   
+         end if   
+!
+!    The elongated geometries (+ basis vectors, directly convert them to 
+!         cartesian coordinates)
+!
+         if (index(line,'name="basis"') .ne. 0) then
+            hit_act2=hit_act2+1
+            if (hit_act2 .gt. 3) then
+               pos_act=pos_act+1
+               read(78,*) adum,a_vec(:)
+               read(78,*) adum,b_vec(:)
+               read(78,*) adum,c_vec(:)
+               do j=1,9
+                  read(78,'(a)') adum
+               end do
+               do j=1,natoms
+                  read(78,*) adum,pos_vecs(:,j,pos_act)
+                  pos_vecs(:,j,pos_act)=pos_vecs(1,j,pos_act)*a_vec(:)+ &
+                            & pos_vecs(2,j,pos_act)*b_vec(:)+ pos_vecs(3,j,pos_act)*c_vec(:)
+               end do
+            end if
+         end if
+!
+!    The dipole moments: only the last one for each SCF cycle:
+!     Index of the last geometry before it
+!
+         if (index(line,'name="dipole"') .ne. 0) then
+            read(line,*) adum,adum,dipoles(:,pos_act+1)
+         end if        
+         
+!
+!    The elongation during the numerical calculation
+!
+         if (index(line,'POTIM') .ne. 0) then
+            read(line,*) adum,adum,string
+            read(string(1:8),*) potim 
+         end if        
+!
+!    The masses of all atoms 
+!
+         if (index(line,'atomspertype') .ne. 0) then
+            if (el_mass(1) .lt. 0.01) then         
+               read(78,*)
+               read(78,*)
+               read(78,*)
+               read(78,*)
+               read(78,*)
+               do k=1,el_num
+                  read(78,'(a)') line
+                  read(line(34:46),*) el_mass(k)
+               end do
+               allocate(coord_mass(3*num_moved),at_mass(natoms))
+               allocate(at_names(natoms))
+               allocate(at_index(natoms))
+               ind=1
+               do k=1,el_num
+                  do l=1,el_numbers(k)
+                     at_mass(ind)=el_mass(k)
+                     at_names(ind)=el_names(k)
+                     call elem(at_names(ind),at_index(ind))
+                     ind=ind+1
+                  end do                  
+               end do
+
+               do k=1,num_moved
+                  coord_mass((k-1)*3+1)=at_mass(at_moved(k))
+                  coord_mass((k-1)*3+2)=at_mass(at_moved(k))
+                  coord_mass((k-1)*3+3)=at_mass(at_moved(k))
+               end do
+            end if        
+         end if
+
+
+      end do
+
+   end if
+!----------------------------------------------------------------------------
+!     Read in the data from the different chunk folders if chunks are present
+!
    do i=1,nchunks 
       if (i .lt. 10) then
          write(foldername,'(a,i1)') "chunk",i
@@ -446,6 +571,7 @@ if (eval) then
       else
          write(foldername,'(a,i3)') "chunk",i
       end if
+
 
       call chdir(foldername)   
 !
