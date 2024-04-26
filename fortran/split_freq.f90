@@ -520,7 +520,7 @@ if (eval) then
          if (index(line,'POTIM') .ne. 0) then
             read(line,*) adum,adum,string
             read(string(1:8),*) potim 
-         end if        
+         end if       
 !
 !    The masses of all atoms 
 !
@@ -687,11 +687,21 @@ if (eval) then
       
    end do
 !
+!    If POTIM is chosen too large, set it to 0.015, analogous to VASP,
+!    where the same is done!
+!
+   if (potim .gt. 0.1d0) then
+      potim=0.015d0
+      write(*,*) "The POTIM parameter has been chosen to be smaller than 0.1 "
+      write(*,*) " in the INCAR file! It will be set to 0.015, since VASP does"
+      write(*,*) " the same!"
+   end if
+!
 !    Give a warning if no dipoles were found
 !
    do_intens=.true.
    if (abs(sum(dipoles)) .lt. 0.001d0) then
-       write(*,*) "WARNING: No dipoles were found in vasprun.xml files!"
+       write(*,*) "WARNING: No dipoles were found in vasprun.xml file(s)!"
        write(*,*) " Did you forget to add the LDIPOL and IDIPOL keywords?"
        write(*,*) "IR intensities will not be calculated."
        do_intens=.false.
@@ -737,7 +747,6 @@ if (eval) then
    allocate(WORK(LWORK))
    A_mat=hess
    call DSYEV(JOBZ,UPLO,Nn,A_mat,LDA,W,WORK,LWORK,INFO)
-
    if (info .ne. 0) then
       write(*,*) "The diagonalization of the hessian matrix with Lapack returned"
       write(*,*) " an error code!"
