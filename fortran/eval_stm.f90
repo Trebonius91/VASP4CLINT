@@ -13,19 +13,22 @@
 program eval_stm
 implicit none 
 integer::readstat
-integer::i,j,k,l,m
+integer::i,j,k,l,m,n
 integer::k_act,l_act,m_act
 integer::natoms,nelems
 integer::grida,gridb,gridc
 integer::nx,ny,nz
 integer::stm_gridx,stm_gridy
 integer::near_x,near_y,near_z
+integer::repeat_x,repeat_y
 integer::include_x,include_y,include_z
 real(kind=8)::scale
 real(kind=8)::a_fac,cutoff,g_width
 real(kind=8)::x_len,y_len,z_len
 real(kind=8)::stm_height,isos_dens
-real(kind=8)::dist_act
+real(kind=8)::x_plot_min,x_plot_max
+real(kind=8)::y_plot_min,y_plot_max
+real(kind=8)::dist_act,xtoy
 real(kind=8)::weight_sum,weight
 real(kind=8)::coord_mat(3,3)
 real(kind=8)::act_pos(3)
@@ -41,6 +44,40 @@ character(len=30)::stm_mode
 character(len=2),allocatable::el_names_read(:),el_names(:)
 character(len=2),allocatable::at_names(:)
 integer,allocatable::el_nums(:)
+
+write(*,*) 
+write(*,*) "PROGRAM eval_stm: Plots a STM image from a VASP"
+write(*,*) " PARCHG file based on the Tersoff-Hamann approach."
+write(*,*) "Constant height and constant current images are possible."
+write(*,*) "The only needed input is a PARCHG file for a certain"
+write(*,*) " energy range below the Fermi level, corresponding to an"
+write(*,*) " experimental STM tunneling voltage."
+write(*,*) "The following command line arguments can be given:"
+write(*,*) "  -mode=[height or current] : Determines if the constant"
+write(*,*) "    height or constant current STM mode shall be used."
+write(*,*) "  -pos=[value] : For constant height STMs: the position of"
+write(*,*) "    imaginary tip along the z-axis of the unit cell."
+write(*,*) "  -dens=[value] : For constant current STMs : The charge "
+write(*,*) "    density at which the tip shall be located at each grid"
+write(*,*) "    point along x and y, resulting in a z-value (height)."
+write(*,*) "  -repeat_x=[number] : For the generated picture: the number"
+write(*,*) "    of unit cell repetitions along x-axis to generate a larger  "
+write(*,*) "    picture which shows the periodicity. (DEFAULT: 1)"
+write(*,*) "  -repeat_y=[number] : For the generated picture: the number"
+write(*,*) "    of unit cell repetitions along y-axis to generate a larger  "
+write(*,*) "    picture which shows the periodicity. (DEFAULT: 1)"
+write(*,*) "  -grid_x=[number] : The number of grid points along x-axis "
+write(*,*) "    in the unit cell at which the STM picture shall be "
+write(*,*) "    calculated. (DEFAULT: 100)"
+write(*,*) "  -grid_y=[number] : The number of grid points along y-axis "
+write(*,*) "    in the unit cell at which the STM picture shall be "
+write(*,*) "    calculated. (DEFAULT: 100)"
+write(*,*) "  -gauss_width=[value] : The full width of half maximum of the"
+write(*,*) "    Gaussian that is used to smooth the image by including the "
+write(*,*) "    charge densities around an evaluation point by weighting them"
+write(*,*) "    with the Gaussian function value. The larger the value, the"
+write(*,*) "    smoother/smeared the picture will be. (DEFAULT: 0.3 Angs.)"
+write(*,*) 
 
 !
 !    Read command line arguments
@@ -109,6 +146,43 @@ do i = 1, command_argument_count()
 end do
 
 !
+!     The number of STM image repetitions along the x axis
+!
+!     Default (only actual unit cell)
+!
+repeat_x=1
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:10))  .eq. "-repeat_x=") then
+      read(arg(11:),*,iostat=readstat) repeat_x
+      if (readstat .ne. 0) then
+         write(*,*)
+         stop "Check the command -repeat_x=..., something went wrong!"
+         write(*,*)
+      end if
+   end if
+end do
+write(*,'(a,i3)') " Number of unit cell repetitions along x: ",repeat_x
+
+!
+!     The number of STM image repetitions along the y axis
+!
+!     Default (only actual unit cell)
+!
+repeat_y=1
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:10))  .eq. "-repeat_y=") then
+      read(arg(11:),*,iostat=readstat) repeat_y
+      if (readstat .ne. 0) then
+         write(*,*)
+         stop "Check the command -repeat_y=..., something went wrong!"
+         write(*,*)
+      end if
+   end if
+end do
+write(*,'(a,i3)') " Number of unit cell repetitions along y: ",repeat_y
+!
 !     The number of grid points for STM printout along the x axis 
 !
 !     Default
@@ -125,6 +199,8 @@ do i = 1, command_argument_count()
       end if
    end if
 end do
+write(*,'(a,i6)') " Number of plotted STM grid points (unit cell) along x: ",stm_gridx
+
 !
 !     The number of grid points for STM printout along the y axis
 !
@@ -142,6 +218,8 @@ do i = 1, command_argument_count()
       end if
    end if
 end do
+write(*,'(a,i6)') " Number of plotted STM grid points (unit cell) along y: ",stm_gridy
+
 !
 !     The width at half maximum (FWHM) of the Gaussian used for 
 !       smoothing the picture
@@ -160,14 +238,15 @@ do i = 1, command_argument_count()
       end if
    end if
 end do
-
+write(*,'(a,f12.7)') " Width of the smooting Gaussian at half height (Angs.): ",g_width
 !
 !    Determine the properties and the function of the smoothing Gaussian
 !
 a_fac=dlog(2.d0)/((g_width/2d0)**2)
 cutoff=sqrt(dlog(100d0)/a_fac)
 
-write(*,*) cutoff
+write(*,*) 
+write(*,*) "Read in the PARCHG file ..."
 !
 !    Open file PARCHG and read in relevant data
 !
@@ -241,7 +320,13 @@ allocate(cdens(grida,gridb,gridc))
 !
 read(15,*) (((cdens(nx,ny,nz),nx=1,grida),ny=1,gridb),nz=1,gridc)
 close(15)
-
+write(*,*) "  done!"
+write(*,'(a)') " Length of coordinate axes (Angstroms):"
+write(*,'(a,f12.6,a,f12.6,a,f12.6,a)') "   x:",x_len,", y:",y_len,", z:",y_len
+write(*,'(a,i6,a,i6,a,i6,a,i9,a)') " Number of partial density grid points:"
+write(*,'(a,i6,a,i6,a,i6,a,i9,a)') "   x:",grida, &
+              & ", y:",gridb,", z:",gridc, "   (total:",grida*gridb*gridc,")"
+write(*,*)
 !
 !    Calculate x,y,z cartesian coordinates for all grid points, for the 
 !    subsequent determination of distances to the current sampling point
@@ -253,7 +338,7 @@ do i=1,gridc
          vec_act(1)=real((k-1))/real(grida)
          vec_act(2)=real((j-1))/real(gridb)
          vec_act(3)=real((i-1))/real(gridc)
-         c_coord(:,k,j,i)=matmul(vec_act,coord_mat)
+         c_coord(:,k,j,i)=vec_act(:)!matmul(vec_act,coord_mat)
       end do
    end do
 end do    
@@ -266,20 +351,16 @@ stm_dat=0.d0
 !
 !    Determine number of grid points to be included into the Gaussian
 !    smoothin region
+!    Along z only half the length! (since we do not probe into depth)
 !
 include_x=nint(real(cutoff)/real(x_len)*real(grida))
 include_y=nint(real(cutoff)/real(y_len)*real(gridb))
-include_z=nint(real(cutoff)/real(z_len)*real(gridc))
+include_z=nint(real(cutoff)/real(z_len)*real(gridc)/2)
+write(*,*) "Generate the STM picture at all plot grid points ...  "
 !
 !    A: CONSTANT HEIGHT MODE
 !
 if (stm_mode .eq. "height") then
-!
-!    Desired height/z-coordinate in internal coordinates
-!
-  
-   write(*,*) "pos",act_pos(3)
-   write(*,*) include_x,include_y,include_z
 !
 !    Loop over all pricture gridpoints in the x-y (or a-b) plane and calculate 
 !    the Gaussian-weighted interpolation of nearby grid points
@@ -295,13 +376,14 @@ if (stm_mode .eq. "height") then
          near_x=nint(act_pos(1)*grida)
          near_y=nint(act_pos(2)*gridb)
          near_z=nint(act_pos(3)*gridc)
-
-         act_pos(:)=matmul(act_pos,coord_mat)
+       !  act_pos(:)=matmul(act_pos,coord_mat)
+         
 !
 !    Now loop over all other grid points within the proposed cutoff of the 
 !    Gaussian smearing function
 !
          weight_sum=0
+    !     write(*,*) "new ++++++++++++++++++++++++++++++++++++++++++++"
          do k=near_x-include_x,near_x+include_x
             if (k .lt. 1) then
                k_act=grida+k
@@ -325,8 +407,24 @@ if (stm_mode .eq. "height") then
                      m_act=m-gridc
                   else
                      m_act=m
-                  end if   
-                  diff_vec(:)=act_pos(:)-c_coord(:,k_act,l_act,m_act)                  
+                  end if  
+!
+!    Now sum over all grid points within the chosen cutoff for consideration
+!    and add the components together
+!
+                !  write(*,*) k_act,l_act,m_act
+                  diff_vec(:)=act_pos(:)-c_coord(:,k_act,l_act,m_act)       
+                  
+                  do n=1,3
+                     if (diff_vec(n) .gt. 0.5d0) then
+                        diff_vec(n) = diff_vec(n)-0.5d0     
+                     end if  
+                     if (diff_vec(n) .lt. 0.d0) then
+                        diff_vec(n) = diff_vec(n)+0.5d0 
+                     end if        
+                  end do
+
+                  diff_vec=matmul(diff_vec,coord_mat)
                   dist_act=sqrt(dot_product(diff_vec,diff_vec))
                   weight=exp(-g_width*dist_act*dist_act)
                   weight_sum=weight_sum+weight
@@ -335,31 +433,84 @@ if (stm_mode .eq. "height") then
             end do
          end do      
          stm_dat(j,i)=stm_dat(j,i)/weight_sum
+         act_pos=matmul(act_pos,coord_mat)
          stm_pos(:,j,i)=act_pos(1:2)
 
-         !    write(*,*) near_x,near_y,near_z
-!
-!    Now sum over all grid points within the chosen cutoff for consideration
-!    and add the components together
-!
       end do
    end do    
-end if        
-
+end if       
+write(*,*) " done!"
 !
 !    Write plot file with STM data
 !
+write(*,*) "Write file with 2D plot data for STM image (stm_plot.dat) ..."
 open(unit=37,file="stm_plot.dat",status="replace")
 write(37,*) "# This data has been generated by the program eval_stm."
 write(37,*) "# x-coord     y-coord     intenstiy  "
-do i=1,stm_gridx
-   do j=1,stm_gridy
-      write(37,*) stm_pos(1,j,i),stm_pos(2,j,i),stm_dat(j,i)
-   end do
-   write(37,*)
+x_plot_min=100.d0
+x_plot_max=-100.d0
+y_plot_min=100.d0
+y_plot_max=-100.d0
+do k=1,repeat_x
+   do i=1,stm_gridx
+      do l=1,repeat_y
+         do j=1,stm_gridy
+            vec_act(1)=real(k)
+            vec_act(2)=real(l)
+            vec_act(3)=1.d0
+            vec_act=matmul(vec_act,coord_mat)
+            vec_act(1)=vec_act(1)+stm_pos(1,j,i)
+            vec_act(2)=vec_act(2)+stm_pos(2,j,i)
+            if (vec_act(1) .lt. x_plot_min) then
+               x_plot_min=vec_act(1)
+            else if (vec_act(1) .gt. x_plot_max) then
+               x_plot_max=vec_act(1)
+            end if
+            if (vec_act(2) .lt. y_plot_min) then
+               y_plot_min=vec_act(2)
+            else if (vec_act(2) .gt. y_plot_max) then
+               y_plot_max=vec_act(2)
+            end if
+            write(37,*) vec_act(1), vec_act(2), stm_dat(j,i)
+         end do
+      end do 
+      write(37,*)  
+   end do   
 end do   
 close(37)
+write(*,*) " done!"
+!
+!    Write gnuplot file for the plot
+!    Automatically align the plotted png picture to the proportion of 
+!     x and y axes lengths
+!
+write(*,*) "Write gnuplot file for 2D plot of STM image (stm_plot.gnu) ..."
+xtoy=(x_plot_max-y_plot_min)/(y_plot_max-y_plot_min)
+open(unit=38,file="stm_plot.gnu",status="replace")
+write(38,*) "# This file generates a png picture from 'stm_plot.dat'."
+write(38,*) "set terminal png size 2000,",nint(2000/xtoy)," lw 2.0 font 'Helvetica,35'"
+write(38,*) "set output 'stm_plot.png'"
+write(38,*) "set encoding iso_8859_1"
+write(38,*) "set lmargin screen 0.10"
+write(38,*) "set rmargin screen 0.83"
+write(38,*) "set tmargin screen 0.16"
+write(38,*) "set bmargin screen 0.95"
+write(38,*) "set xrange [",x_plot_min,":",x_plot_max,"]"
+write(38,*) "set yrange [",y_plot_min,":",y_plot_max,"]"
+write(38,*) "set xlabel 'x-coordinate ({\305})"
+write(38,*) "set ylabel 'y-coordinate ({\305})"
+write(38,*) "set cblabel 'local density (e/{\305}^3)' offset -.8,0"
+write(38,*) "set palette gray"
+write(38,*) "set pm3d map"
+write(38,*) "splot 'stm_plot.dat' with pm3d"
+close(38)
 
-
+write(*,*) " done!"
+write(*,*) "Execute gnuplot to obtain image (stm_plot.png) ..."
+call system("gnuplot stm_plot.gnu")
+write(*,*) " done!"
+write(*,*)
+write(*,*) "eval_stm has finished all tasks, goodbye!"
+write(*,*)
 
 end program eval_stm        
