@@ -61,9 +61,12 @@ write(*,*) "  -mode=[height or current] : Determines if the constant"
 write(*,*) "    height or constant current STM mode shall be used."
 write(*,*) "  -pos=[value] : For constant height STMs: the position of"
 write(*,*) "    imaginary tip along the z-axis of the unit cell."
+write(*,*) "    The value needs to be between 0 and the height of the"
+write(*,*) "    unit cell! (in Angstroms)"
 write(*,*) "  -dens=[value] : For constant current STMs : The charge "
 write(*,*) "    density at which the tip shall be located at each grid"
 write(*,*) "    point along x and y, resulting in a z-value (height)."
+write(*,*) "    Reasonable values are between 0.01 and 0.1"
 write(*,*) "  -repeat_x=[number] : For the generated picture: the number"
 write(*,*) "    of unit cell repetitions along x-axis to generate a larger  "
 write(*,*) "    picture which shows the periodicity. (DEFAULT: 1)"
@@ -86,7 +89,7 @@ write(*,*)
 !    For the constant current mode: the moving up of the tip for each 
 !    new row position (in Angstroms)
 !
-def_z_shift=1.d0
+def_z_shift=2.d0
 !
 !    Read command line arguments
 !
@@ -152,6 +155,16 @@ do i = 1, command_argument_count()
       end if
    end if
 end do
+if (trim(stm_mode) .eq. "current") then
+   if (isos_dens .lt. 0.d0) then
+      write(*,*) "Please give a positive density (e/Ang^3) to which the "
+      write(*,*) " shall be moved down in each grid point!"
+      stop
+   else
+      write(*,'(a,f10.6,a)') " The local density to which the STM tip will be dropped is ", &
+                      & isos_dens," e/Ang.^3"
+   end if
+end if
 
 !
 !     The number of STM image repetitions along the x axis
@@ -330,7 +343,7 @@ read(15,*) (((cdens(nx,ny,nz),nx=1,grida),ny=1,gridb),nz=1,gridc)
 close(15)
 write(*,*) "  done!"
 write(*,'(a)') " Length of coordinate axes (Angstroms):"
-write(*,'(a,f12.6,a,f12.6,a,f12.6,a)') "   x:",x_len,", y:",y_len,", z:",y_len
+write(*,'(a,f12.6,a,f12.6,a,f12.6,a)') "   x:",x_len,", y:",y_len,", z:",z_len
 write(*,'(a,i6,a,i6,a,i6,a,i9,a)') " Number of partial density grid points:"
 write(*,'(a,i6,a,i6,a,i6,a,i9,a)') "   x:",grida, &
               & ", y:",gridb,", z:",gridc, "   (total:",grida*gridb*gridc,")"
@@ -404,7 +417,6 @@ if (trim(stm_mode) .eq. "height") then
 !    Gaussian smearing function
 !
          weight_sum=0
-    !     write(*,*) "new ++++++++++++++++++++++++++++++++++++++++++++"
          do k=near_x-include_x,near_x+include_x
             if (k .lt. 1) then
                k_act=grida+k
@@ -479,7 +491,7 @@ if (trim(stm_mode) .eq. "current") then
 !    z-grid density within the given PARCHG file.
 !
    eval_stat = .false.
-   z_step=1.d0/(gridc*8d0)
+   z_step=1.d0/(gridc*3d0)
    do i=1,stm_gridx
 !
 !    Every 10% of the read in, give a status update
@@ -492,104 +504,16 @@ if (trim(stm_mode) .eq. "current") then
             end if
          end if
       end do
-
-      act_pos(1)=real((i-1))/real(stm_gridx)
-      act_pos(2)=0.d0
-  !    if (i .eq. 1) then
-         act_pos(3)=0.8d0
-  !    else 
-  !       act_pos(3)=prev_z_init+def_z_shift/z_len
-  !    end if 
-!
-!    Scan the starting position for a new grid point
-!
-      do 
-         act_pos(3)=act_pos(3)-z_step
-         if (act_pos(3) .ge. 1.d0) then
-            write(*,*) "The tip would be located outside the cell!"
-            write(*,*) "Increase the -dens parameter if possible!"
-            stop
-         end if
-!
-!    Determine nearest point in density grid
-!
-         near_x=nint(act_pos(1)*grida)
-         near_y=nint(act_pos(2)*gridb)
-         near_z=nint(act_pos(3)*gridc)
-!
-!    Now loop over all other grid points within the proposed cutoff of the 
-!    Gaussian smearing function
-!
-         weight_sum=0.d0
-         stm_act=0.d0
-         do k=near_x-include_x,near_x+include_x
-            if (k .lt. 1) then
-               k_act=grida+k
-            else if (k .gt. grida) then
-               k_act=k-grida
-            else
-               k_act=k
-            end if
-            do l=near_y-include_y,near_y+include_y
-               if (l .lt. 1) then
-                  l_act=gridb+l
-               else if (l .gt. gridb) then
-                  l_act=l-gridb
-               else
-                  l_act=l
-               end if
-               do m=near_z-include_z,near_z+include_z
-                  if (m .lt. 1) then
-                     m_act=gridc+m
-                  else if (m .gt. gridc) then
-                     m_act=m-gridc
-                  else
-                     m_act=m
-                  end if
-!
-!    Now sum over all grid points within the chosen cutoff for consideration
-!    and add the components together
-!
-                  diff_vec(:)=act_pos(:)-c_coord(:,k_act,l_act,m_act)
-
-                  do n=1,3
-                     if (diff_vec(n) .gt. 0.5d0) then
-                        diff_vec(n) = diff_vec(n)-0.5d0
-                     end if
-                     if (diff_vec(n) .lt. 0.d0) then
-                        diff_vec(n) = diff_vec(n)+0.5d0
-                     end if
-                  end do
-
-                  diff_vec=matmul(diff_vec,coord_mat)
-                  dist_act=sqrt(dot_product(diff_vec,diff_vec))
-                  weight=exp(-g_width*dist_act*dist_act)
-                  weight_sum=weight_sum+weight
-                  stm_act=stm_act+cdens(k_act,l_act,m_act)
-               end do
-            end do
-         end do
-!
-!    Leave the scanning loop if either the corrent density has been found or 
-!    the tip reached the ground of the unit cell
-!
-
-         stm_act=stm_act/weight_sum
-         if ((stm_act .ge. isos_dens) .or. (act_pos(3) .lt. 0.01d0)) then
-            act_pos=matmul(act_pos,coord_mat)
-            stm_pos(:,1,i)=act_pos(1:2)
-            stm_dat(1,i)=act_pos(3)-0.4
-            prev_z_init=act_pos(3)/z_len
-            exit
-         end if        
-
-      end do 
+ 
+      if (i .eq. 1) then
+         prev_z=0.8d0-def_z_shift/z_len
+      end if
 !
 !    Now loop trough the remaining points of the current row and start with the init z value
 !    of this row
 !
-      prev_z=prev_z_init
-      do j=2,stm_gridy
+!      prev_z=prev_z_init
+      do j=1,stm_gridy
          act_pos(1)=real((i-1))/real(stm_gridx)
          act_pos(2)=real((j-1))/real(stm_gridy)
          act_pos(3)=prev_z+def_z_shift/z_len
@@ -597,7 +521,6 @@ if (trim(stm_mode) .eq. "current") then
 !    Scan the starting position for a new grid point
 !
          do
-            act_pos(3)=act_pos(3)-z_step
             if (act_pos(3) .ge. 1.d0) then
                write(*,*) "The tip would be located outside the cell!"
                write(*,*) "Increase the -dens parameter if possible!"
@@ -646,14 +569,10 @@ if (trim(stm_mode) .eq. "current") then
                      diff_vec(:)=act_pos(:)-c_coord(:,k_act,l_act,m_act)
    
                      do n=1,3
-                        if (diff_vec(n) .gt. 0.5d0) then
-                           diff_vec(n) = diff_vec(n)-0.5d0
-                        end if
-                        if (diff_vec(n) .lt. 0.d0) then
-                           diff_vec(n) = diff_vec(n)+0.5d0
-                        end if
+                        do while (abs(diff_vec(n)) .gt. 0.5d0)
+                           diff_vec(n) = diff_vec(n) -sign(1.0d0,diff_vec(n))
+                        end do
                      end do
-
                      diff_vec=matmul(diff_vec,coord_mat)
                      dist_act=sqrt(dot_product(diff_vec,diff_vec))
                      weight=exp(-g_width*dist_act*dist_act)
@@ -674,6 +593,7 @@ if (trim(stm_mode) .eq. "current") then
                prev_z=act_pos(3)/z_len
                exit
             end if
+            act_pos(3)=act_pos(3)-z_step
          end do
       end do   
    end do
@@ -725,15 +645,15 @@ write(*,*) " done!"
 !     x and y axes lengths
 !
 write(*,*) "Write gnuplot file for 2D plot of STM image (stm_plot.gnu) ..."
-xtoy=(x_plot_max-y_plot_min)/(y_plot_max-y_plot_min)
+xtoy=(x_plot_max-x_plot_min)/(y_plot_max-y_plot_min)
 open(unit=38,file="stm_plot.gnu",status="replace")
 write(38,*) "# This file generates a png picture from 'stm_plot.dat'."
-write(38,*) "set terminal png size 2000,",nint(2000/xtoy)," lw 2.0 font 'Helvetica,35'"
+write(38,*) "set terminal png size 2400,",nint(2000/xtoy)," lw 3.5 font 'Helvetica,46'"
 write(38,*) "set output 'stm_plot.png'"
 write(38,*) "set encoding iso_8859_1"
 write(38,*) "set lmargin screen 0.10"
 write(38,*) "set rmargin screen 0.80"
-write(38,*) "set tmargin screen 0.16"
+write(38,*) "set tmargin screen 0.13"
 write(38,*) "set bmargin screen 0.95"
 write(38,*) "set xrange [",x_plot_min,":",x_plot_max,"]"
 write(38,*) "set yrange [",y_plot_min,":",y_plot_max,"]"
@@ -744,10 +664,11 @@ if (trim(stm_mode) .eq. "height") then
 end if
 if (trim(stm_mode) .eq. "current") then
    write(38,*) "set cblabel 'height ({\305})' offset -.8,0"
-end if        
+end if       
+write(38,*) "set cblabel offset 0.8,0" 
 write(38,*) "set palette gray"
-write(38,*) "set pm3d map"
-write(38,*) "splot 'stm_plot.dat' with pm3d"
+write(38,*) "set pm3d map interpolate 0,0"
+write(38,*) "splot 'stm_plot.dat' with pm3d notitle"
 close(38)
 
 write(*,*) " done!"

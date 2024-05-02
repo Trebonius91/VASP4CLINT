@@ -360,11 +360,23 @@ if (eval) then
    read(56,*) el_numbers
    natoms=sum(el_numbers)
    read(56,'(a)') select_string
-   read(56,'(a)') coord_string
+   if ((index(select_string,'Direct') .ne. 0) .or. &
+       &  (index(select_string,'direct') .ne. 0) .or. &
+       &  (index(select_string,'Cartesian') .ne. 0) .or. &
+       &  (index(select_string,'cartesian') .ne. 0)) then
+      coord_string = select_string
+   else
+      read(56,'(a)') coord_string
+   end if
    allocate(xyz(3,natoms))
    allocate(selective(3,natoms))
    do i=1,natoms
-      read(56,*) xyz(:,i),selective(:,i)
+      read(56,'(a)',iostat=readstat) adum
+      read(adum,*,iostat=readstat) xyz(:,i),selective(:,i)
+      if (readstat .ne. 0) then
+         read(adum,*,iostat=readstat) xyz(:,i)
+         selective(:,i) = "T"
+      end if
    end do
    close(56)
 !
@@ -731,6 +743,7 @@ if (eval) then
    end do
    write(*,*) "done!"
    write(*,*) "Diagonalize the Hessian and calculate normal modes..."
+
 !
 !    Diagonalize the hessian
 !
@@ -805,6 +818,7 @@ if (eval) then
 !
 !     Calculate the dipol derivatives 
 !
+
    if (do_intens) then
       allocate(dipgrad(3,3,natoms))
       allocate(dxyz(3,natoms))
