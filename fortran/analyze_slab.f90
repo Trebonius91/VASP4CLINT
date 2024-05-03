@@ -1,11 +1,15 @@
 !
-!    analyze_scalms: Analyze VASP or LAMMPS simulations of 
-!      SCALMS systems from trajectories, preferentially surface slabs
+!    analyze_slab: Analyze VASP or LAMMPS simulations of 
+!      surface slab systems from trajectories, calculates several
+!      useful measures like averaged element densities orthogonal
+!      to the surface, diffusion coefficients, radial distribution!
+!      functions and picks example structures for further calculations
+!      like core level shifts or partial charges.
 !    Part of VASP4CLINT
 !     Julien Steffen, 2023 (julien.steffen@fau.de)
 !
 
-program analyze_scalms
+program analyze_slab
 implicit none
 integer::i,j,k,l,m,r,o,p
 integer::xdat_lines,dump_lines
@@ -53,7 +57,7 @@ real(kind=8),allocatable::rdf_plot(:,:,:)
 real(kind=8),allocatable::neighnum(:,:,:)
 real(kind=8)::pos1(3),pos2(3),diff_vec(3)
 real(kind=8)::dist,pi
-real(kind=8)::z_shift
+real(kind=8)::z_shift,z_val_max
 real(kind=8)::pres_tensor(3,3),pres_tensor_total(3,3)  ! the pressure tensor for surface tension
 real(kind=8)::pres_xx,pres_yy,pres_zz,pres_xy,pres_yz,pres_zx,tension
 real(kind=8),allocatable::vector1(:),vector2(:),vector3(:),pos_diff(:)
@@ -67,8 +71,8 @@ integer::task_act,all_tasks
 integer::rdf_bins
 
 
-write(*,*) "PROGRAM analyze_scalms: Evaluation of VASP ML-FF (or LAMMPS ReaxFF)"
-write(*,*) " trajectories for binary and ternary SCALMS."
+write(*,*) "PROGRAM analyze_slab: Evaluation of VASP DFT/ML-FF (or LAMMPS ReaxFF)"
+write(*,*) " trajectories for surface slabs with two or three elements."
 write(*,*) "The file XDATCAR (or dump.xyz in case of xyz trajectories) must be present!"
 write(*,*) "The following command line arguments can/must be given (with - sign!):"
 write(*,*) " -reaxff : A ReaxFF xyz trajectory 'dump.xyz' will be analyzed."
@@ -88,6 +92,11 @@ write(*,*) " -dens_slices=[number] : In how many parts the z-axis shall be divid
 write(*,*)"      the evaluation of element densities (default: 501)."
 write(*,*) " -z_shift=[value] : The z-coordinates of the frames are shifted by the value,"
 write(*,*) "     given in direct coordinates (0 to 1.0)."
+write(*,*) " -z_val_max=[value] : Usually, the slab is assumed to be located in the lower "
+write(*,*) "     half of the simulation cell (small z values). If z is large, close to 1 "
+write(*,*) "     in direct coordinates, the atoms are moved by -1 in z-coordinates. If the"
+write(*,*) "     slab is located in the upper half or correction is not needed at all, set"
+write(*,*) "     this value to 1.0. (default: 0.9)"
 write(*,*) " -cls_element=[element]: CLS calculation templates will be generated for"
 write(*,*) "     the chosen element."
 write(*,*) " -cls_slices=[number]: How many different slices along the z-coordinate where "
@@ -193,6 +202,10 @@ do i = 1, command_argument_count()
    end if
 end do
 
+!
+!    Shift the z-coordinates of all atoms in direct coordinates by the 
+!      given value
+!
 z_shift = 0.0
 do i = 1, command_argument_count()
    call get_command_argument(i, arg)
@@ -201,6 +214,19 @@ do i = 1, command_argument_count()
       write(*,*) "The z-coordinates (direct) will be shifted by ",z_shift
    end if
 end do
+!
+!    Correct the z-coordinates of the atoms near the upper edge of the cell
+!    in order to make the appearance of plots nicer
+!
+z_val_max = 0.9d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:9))  .eq. "-z_val_max=") then
+      read(arg(10:),*) z_shift
+      write(*,*) "Atoms with z-valuzes larger than ",z_val_max," (direct) will be moved by -1."
+   end if
+end do
+
 
 !
 !    The number of slices the z-axis will be divided for element densities
@@ -570,7 +596,7 @@ else
 !     move them to values close below zero for better appearance
 !
 
-            if (act_num(k) .gt. 0.9d0) then
+            if (act_num(k) .gt. z_val_max) then
                act_num(k) = act_num(k)-1.d0
             end if        
 
@@ -676,7 +702,7 @@ if (calc_rdf) then
       do m=l,nelems
          do i=frame_first,nframes
             task_act=task_act+1
-            !
+!
 !    Every 10% of the process, give a status update 
 !
             do j=1,10
@@ -1346,9 +1372,9 @@ if (cls_element .ne. "XX") then
 end if
 34 continue
 write(*,*)
-write(*,*) "analyze_scalms ended normally..."
+write(*,*) "analyze_slab ended normally..."
 write(*,*)
-end program analyze_scalms
+end program analyze_slab
 
 
 subroutine replace_text (s,text,rep,outs)

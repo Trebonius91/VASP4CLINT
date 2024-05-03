@@ -40,7 +40,7 @@ Currently included are:
 
 ## Fortran programs:
 
- - **analyze_scalms** : Analyze trajectories of liquid metal surface or bulk simulations
+ - **analyze_slab** : Analyze trajectories of surface slab simulations
  - **cut_unitcell** : Cut an arbitrary shaped surface slab unit cell from a given larger surface slab
  - **eval_bader** : Evaluates and visualizes Bader charge calculations
  - **mlff_select** : Selects basis functions for a VASP machine learning force field from given ML_AB files
