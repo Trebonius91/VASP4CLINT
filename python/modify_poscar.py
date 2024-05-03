@@ -193,9 +193,9 @@ if freeze:
          coord_select.append(" F F F ")
       else:   
          coord_select.append(" T T T ")
-   if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac)):
-      xyz_new=xyz
-      select_new=coord_select
+if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac)):
+   xyz_new=xyz
+   select_new=coord_select
 
 
 
