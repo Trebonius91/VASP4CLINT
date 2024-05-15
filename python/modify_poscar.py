@@ -556,9 +556,12 @@ with open("POSCAR_mod","w") as f:
 
    print("Modified POSCAR written by modify_poscar.py")
    print(sys_scale)
-   print(str(a_vec[0]) + "  " + str(a_vec[1]) + "  " + str(a_vec[2]))
-   print(str(b_vec[0]) + "  " + str(b_vec[1]) + "  " + str(b_vec[2]))
-   print(str(c_vec[0]) + "  " + str(c_vec[1]) + "  " + str(c_vec[2]))
+   print("{:18.11f}".format(a_vec[0]) + "  " + "{:18.11f}".format(a_vec[1]) +
+                  "  " + "{:18.11f}".format(a_vec[2]))
+   print("{:18.11f}".format(b_vec[0]) + "  " + "{:18.11f}".format(b_vec[1]) + 
+                  "  " + "{:18.11f}".format(b_vec[2]))
+   print("{:18.11f}".format(c_vec[0]) + "  " + "{:18.11f}".format(c_vec[1]) + 
+                  "  " + "{:18.11f}".format(c_vec[2]))
    for i in range(nelem):
       f.write(elements[i] + " ")
    print(" ")
@@ -588,12 +591,12 @@ with open("POSCAR_mod","w") as f:
             else:   
                select_new.append(" T T T ")
 
-         print(str(xyz_new[i][0]) + " " + str(xyz_new[i][1]) + " " +
-              str(xyz_new[i][2]) + " " + select_new[i])
+         print("{:20.11f}".format(xyz_new[i][0]) + " " + "{:20.11f}".format(xyz_new[i][1]) + " " +
+              "{:20.11f}".format(xyz_new[i][2]) + "     " + select_new[i])
    else:
       for i in range(natoms):
-         print(str(xyz_new[i][0]) + " " + str(xyz_new[i][1]) + " " +
-              str(xyz_new[i][2])) 
+         print("{:20.11f}".format(xyz_new[i][0]) + " " + "{:20.11f}".format(xyz_new[i][1]) + " " +
+              "{:20.11f}".format(xyz_new[i][2])) 
 
 sys.stdout=original_stdout
 print(" done!")
