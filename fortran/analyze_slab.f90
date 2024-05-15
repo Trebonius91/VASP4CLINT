@@ -860,8 +860,10 @@ end do
 write(16,*) "    total  "
 do i=1,nbins-1
    z_vals(i)=zlo+(i-0.5d0)*zstep
-   write(16,*) z_vals(i),z_dens(i,:)/(nframes*xlen*ylen*zstep),z_dens_tot(i)&
-                     & /(nframes*xlen*ylen*zstep)
+   z_dens_tot(i)=z_dens_tot(i)/(nframes*xlen*ylen*zstep)
+   z_dens(i,:)=z_dens(i,:)/(nframes*xlen*ylen*zstep)
+   write(16,*) z_vals(i),z_dens(i,:),z_dens_tot(i)
+   
 end do
 close(16)
 !
@@ -891,7 +893,7 @@ if (nelems .gt. 1) then
 !     Only evaluate parts of the profile that are high enough to event processing of 
 !     numerical noise or detached atoms
 !
-      if (z_dens_tot(i) .gt. 0.1d0) then
+      if (z_dens_tot(i) .gt. 0.01d0) then
          if ((z_dens_tot(i) .lt. z_dens_tot(i+1)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-1)) &
           &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+2)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-2)) &
           &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+3)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-3)) &
