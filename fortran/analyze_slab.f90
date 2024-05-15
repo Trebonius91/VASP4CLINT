@@ -887,21 +887,27 @@ if (nelems .gt. 1) then
    tot_side=0.d0
    nmins=0
    do i=14,nbins-13
-      if ((z_dens_tot(i) .lt. z_dens_tot(i+1)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-1)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+2)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-2)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+3)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-3)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+4)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-4)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+5)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-5)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+6)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-6)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+7)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-7)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+8)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-8)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+9)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-9)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+10)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-10)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+11)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-11)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+12)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-12)) &
-       &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+13)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-13))) then
-          nmins=nmins+1
-          min_pos(nmins)=z_vals(i)
+!
+!     Only evaluate parts of the profile that are high enough to event processing of 
+!     numerical noise or detached atoms
+!
+      if (z_den_tot(i) .gt. 0.1d0) then
+         if ((z_dens_tot(i) .lt. z_dens_tot(i+1)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-1)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+2)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-2)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+3)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-3)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+4)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-4)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+5)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-5)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+6)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-6)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+7)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-7)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+8)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-8)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+9)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-9)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+10)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-10)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+11)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-11)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+12)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-12)) &
+          &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+13)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-13))) then
+            nmins=nmins+1
+             min_pos(nmins)=z_vals(i)
+         end if
       end if
    end do
 
