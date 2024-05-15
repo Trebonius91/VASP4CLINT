@@ -891,7 +891,7 @@ if (nelems .gt. 1) then
 !     Only evaluate parts of the profile that are high enough to event processing of 
 !     numerical noise or detached atoms
 !
-      if (z_den_tot(i) .gt. 0.1d0) then
+      if (z_dens_tot(i) .gt. 0.1d0) then
          if ((z_dens_tot(i) .lt. z_dens_tot(i+1)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-1)) &
           &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+2)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-2)) &
           &   .and. (z_dens_tot(i) .lt. z_dens_tot(i+3)) .and. (z_dens_tot(i) .lt. z_dens_tot(i-3)) &
