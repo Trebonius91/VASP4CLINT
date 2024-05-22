@@ -41,6 +41,12 @@ print('''
      should below the maximum tolerance such that no direct
      restart for the next trajectory is needed 
      (resonable choice: 0.2-0.5 Angstroms(?))
+   -check_range=[number1],[number2]: Checks only a part of the 
+     atoms in the system and resets them if too far away. Can 
+     be useful if, e.g., a surface slab is simulated together
+     with a gas phase. Pick the atom numbers of the slab into 
+     this range if no atom of the slab shall go into the gas 
+     phase durinthy dynamics.
 ''')
 
 #
@@ -53,7 +59,12 @@ z_tolerance=-100.0
 #     is not directly canceled
 #
 tol_buffer=-100.0
-
+#
+#     First and last atom index to be used
+#
+check_range=False
+ind_first=0
+ind_last=0
 #
 #     Read in needed parameters from command line 
 #
@@ -64,7 +75,11 @@ for arg in sys.argv:
          z_tolerance=float(actval)
       if param == "-buffer":
          tol_buffer=float(actval)
-
+      if param == "-check_range":
+         actval1,actval2=actval.split(",")
+         ind_first=int(actval1)
+         ind_last=int(actval2)
+         check_range = True
 
 if z_tolerance < -10.0:
    print("Please give a value with the -tolerance command!")
@@ -171,17 +186,27 @@ with open("manage_mlff_md.log", "w") as logfile:
             xyz[i][j]=float(xyz_read[j])
 
    poscar_in.close()
+#
+#    Set checked range to all atoms if not defined otherwise
+#    Else, set it to python range (atom1 has index 0)
+#
+   if not check_range:
+      ind_first=0
+      int_last=natoms-1
+   else:
+      ind_first=ind_first-1
+      ind_last=ind_last-1
 
 #
 #    Determine minimum and maximum values 
 #
 
    if cartesian:
-      zmax=abs((np.amax(xyz,axis=0))[2])
-      zmin=abs((np.amin(xyz,axis=0))[2])
+      zmax=abs((np.amax(xyz[ind_first:ind_last][:],axis=0))[2])
+      zmin=abs((np.amin(xyz[ind_first:ind_last][:],axis=0))[2])
    else:
-      zmax=abs((np.amax(xyz,axis=0))[2]*c_vec[2])
-      zmin=abs((np.amin(xyz,axis=0))[2]*c_vec[2])
+      zmax=abs((np.amax(xyz[ind_first:ind_last][:],axis=0))[2]*c_vec[2])
+      zmin=abs((np.amin(xyz[ind_first:ind_last][:],axis=0))[2]*c_vec[2])
 
 #
 #    Read in INCAR file for number of MD steps 
@@ -440,8 +465,8 @@ with open("manage_mlff_md.log", "w") as logfile:
 #     Determine current z minimum and maximum values 
 #
             else:
-               zmax_act=abs((np.amax(xyz,axis=0))[2])*c_vec[2]
-               zmin_act=abs((np.amin(xyz,axis=0))[2])*c_vec[2]
+               zmax_act=abs((np.amax(xyz[ind_first:ind_last][:],axis=0))[2])*c_vec[2]
+               zmin_act=abs((np.amin(xyz[ind_first:ind_last][:],axis=0))[2])*c_vec[2]
 #
 #     Determine z-elongations and check if they are too large
 #
@@ -503,8 +528,8 @@ with open("manage_mlff_md.log", "w") as logfile:
                            xyz_act[i][j]=float(xyz_read[j])
 
 
-                     zmax_check=abs((np.amax(xyz_act,axis=0))[2])*c_vec[2]
-                     zmin_check=abs((np.amin(xyz_act,axis=0))[2])*c_vec[2]
+                     zmax_check=abs((np.amax(xyz_act[ind_first:ind_last][:],axis=0))[2])*c_vec[2]
+                     zmin_check=abs((np.amin(xyz_act[ind_first:ind_last][:],axis=0))[2])*c_vec[2]
                      z_min_elong=zmin-zmin_check
                      z_max_elong=zmax_check-zmax
                      if (z_min_elong > (z_tolerance-tol_buffer)) or (z_max_elong > (z_tolerance-tol_buffer)):
