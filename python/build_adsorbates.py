@@ -41,6 +41,11 @@ print('''
  Add -cutout, if atoms of the surface near enough to any adsorbate
    shall be removed to avoid collisions (e.g. for placement in surface)
    (works only for adsorbates in principial unit cell!)
+ Add -keep_order, if the ordering of elements in both the surface and 
+   adsorbates shall be kept, such that the species of the surface are 
+   listed first and those of the adsorbates after them (usually, all 
+   atom of an element are combined and resorted into one block)
+
  Further keywords for submission of individual values:
  -dist_act=[value]: The maximum distance to any adsorbate atom, below 
    which all substrate atoms are set to active, if -select_dist was set
@@ -359,6 +364,7 @@ dist_remove=2.0
 zonly = False
 bulk = False
 random = False
+keep_order = False
 rot_surf = False
 cutout = False
 select_dist = False
@@ -387,6 +393,10 @@ if len(sys.argv) > 1:
       if arg == "-select_dist":
           select_dist = True
           print("Only atoms near enough to adsorbates will be free for optimization.")
+      if arg == "-keep_order": 
+          keep_order = True
+          print("The ordering of atoms in surface and adsorbate shall be kept.")
+          print("The surface atoms/elements will come first, then the adsorbates.")
 # Read in the desired length of the system along z-axis
       if arg[0:10] == "-z_length=":
           z_length = float(arg[10:])
@@ -834,6 +844,12 @@ with surface_in as infile:
       for j in range(3):
          xyz_surf[i][j]=float(xyz_read[j])
 
+# If the ordering of the elements of surface/adsorbates shall be preserved,
+# generate a global element names array and fill it first with the surface 
+# element names and numbers
+if keep_order:
+   elements_ordered=elements_surf
+   elem_num_ordered=elem_num_surf
 # Now read in the structure of ionic liquid molecules 
 # The user can select from a predefined library of molecules for that purpose
 
@@ -986,9 +1002,12 @@ else :
       Emat=EulerMatrix(all_mols[m].prec,all_mols[m].nut,all_mols[m].rot)
 
       all_mols[m].Rot_Molecule(Emat)
-
-
-
+#  If the ordering of the elements in the POSCAR shall be kept, add the element 
+#  symbols of the adsorbates to the global list
+      if keep_order:
+         for i in range(len(all_mols[m].elements)):
+            elements_ordered.append(all_mols[m].elements[i])         
+            elem_num_ordered.append(all_mols[m].elem_num[i])
 
 #   Transform surface structure to xyz Angstrom coordinates
 #   Transform them from direct coordinates by formula:
@@ -1193,32 +1212,41 @@ else :
       print(str(b_vec[0]*surf_scale) + "  " + str(b_vec[1]*surf_scale) + "  " + str(b_vec[2]))
       print(str(c_vec[0]) + "  " + str(c_vec[1]) + "  " + str(c_vec[2]*surf_scale))
 
-      new= False
-      elements_all = []
-      for i in range(natoms_tot):
-         name_act = names_tot[i]
-         new = True
-         for j in range(i):
-            if name_act == names_tot[j]:      
-               new = False
-         if new:
-            elements_all.append(name_act) 
-         new = False
-     
+#   If the order of the elements of surface/adsorbates shall be kept,
+#   take the gathered list. Else, determine it globally from the atom
+#   elements 
+      if keep_order:
+         elements_all=elements_ordered
+      else:
+         new= False
+         elements_all = []
+         for i in range(natoms_tot):
+            name_act = names_tot[i]
+            new = True
+            for j in range(i):
+               if name_act == names_tot[j]:      
+                  new = False
+            if new:
+               elements_all.append(name_act) 
+            new = False
+
       el_specs = len(elements_all)
 
       for i in range(el_specs):
          f.write(elements_all[i] + " ")
       f.write("\n")
 
-      elem_num_all=[]
-      for i in range(el_specs):
-         elem_num_all.append(0)
+      if keep_order:
+         elem_num_all=elem_num_ordered
+      else:
+         elem_num_all=[]
+         for i in range(el_specs):
+            elem_num_all.append(0)
 
-      for i in range(natoms_tot):
-         for j in range(el_specs):
-            if names_tot[i] == elements_all[j]:
-               elem_num_all[j] = elem_num_all[j]+1 
+         for i in range(natoms_tot):
+            for j in range(el_specs):
+               if names_tot[i] == elements_all[j]:
+                  elem_num_all[j] = elem_num_all[j]+1 
 
       
       for i in range(el_specs):
@@ -1229,16 +1257,27 @@ else :
       print("Selective Dynamics")
       print("Cartesian")
 
-
-      for i in range(el_specs):
+# If ordered elements are activated, print the atoms in the ordering within
+# the surface and the adsorbates; else, print them according to the global
+# order of elements
+      if keep_order:
          for j in range(natoms_tot):
-            if names_tot[j] == elements_all[i]:
-               if surf_fixed[j]: 
-                  print(str(xyz_tot[j][0]) + " " + str(xyz_tot[j][1]) + " " +
-                       str(xyz_tot[j][2]) + select_false)
-               else: 
-                  print(str(xyz_tot[j][0]) + " " + str(xyz_tot[j][1]) + " " +
-                       str(xyz_tot[j][2]) + select_true) 
+            if surf_fixed[j]:
+               print(str(xyz_tot[j][0]) + " " + str(xyz_tot[j][1]) + " " +
+                    str(xyz_tot[j][2]) + select_false)
+            else:
+               print(str(xyz_tot[j][0]) + " " + str(xyz_tot[j][1]) + " " +
+                    str(xyz_tot[j][2]) + select_true)
+      else:
+         for i in range(el_specs):
+            for j in range(natoms_tot):
+               if names_tot[j] == elements_all[i]:
+                  if surf_fixed[j]: 
+                     print(str(xyz_tot[j][0]) + " " + str(xyz_tot[j][1]) + " " +
+                          str(xyz_tot[j][2]) + select_false)
+                  else: 
+                     print(str(xyz_tot[j][0]) + " " + str(xyz_tot[j][1]) + " " +
+                          str(xyz_tot[j][2]) + select_true) 
 
 sys.stdout=original_stdout
 
