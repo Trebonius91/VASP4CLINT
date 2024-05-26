@@ -590,11 +590,24 @@ with open("POSCAR_mod","w") as f:
                select_new.append(" F F F ")
             else:   
                select_new.append(" T T T ")
+# For direct coordinates, move all atoms into the central unit cell!               
+         if (not cartesian):
+            for j in range(3):
+               while xyz_new[i][j] < 0.0:
+                  xyz_new[i][j] = xyz_new[i][j] + 1.0
+               while xyz_new[i][j] > 1.0:   
+                  xyz_new[i][j] = xyz_new[i][j] - 1.0 
 
          print("{:20.11f}".format(xyz_new[i][0]) + " " + "{:20.11f}".format(xyz_new[i][1]) + " " +
               "{:20.11f}".format(xyz_new[i][2]) + "     " + select_new[i])
-   else:
+   else:       
       for i in range(natoms):
+         if (not cartesian):
+            for j in range(3):
+               while xyz_new[i][j] < 0.0:
+                  xyz_new[i][j] = xyz_new[i][j] + 1.0 
+               while xyz_new[i][j] > 1.0:
+                  xyz_new[i][j] = xyz_new[i][j] - 1.0          
          print("{:20.11f}".format(xyz_new[i][0]) + " " + "{:20.11f}".format(xyz_new[i][1]) + " " +
               "{:20.11f}".format(xyz_new[i][2])) 
 
