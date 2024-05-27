@@ -29,7 +29,7 @@ integer,allocatable::el_numbers(:),chunk_lens(:),at_moved(:)
 integer,allocatable::at_index(:)
 logical::nochunks  ! if no chunks are calculated but only one calculation
 real(kind=8)::cell_scale,cnvint
-real(kind=8)::potim,deltaxyz
+real(kind=8)::potim,deltaxyz,hess_act
 real(kind=8)::a_vec(3),b_vec(3),c_vec(3)
 real(kind=8),allocatable::xyz(:,:),force_vecs(:,:,:),hess(:,:)
 real(kind=8),allocatable::pos_vecs(:,:,:),dipoles(:,:)
@@ -733,6 +733,17 @@ if (eval) then
          end do
       end do
    end do
+!
+!    Perform the symmetrization of the Hessian, as in VASP 
+!
+   do i=1,3*num_moved
+      do j=1,3*num_moved
+         hess_act=0.5d0*(hess(i,j)+hess(j,i)) 
+         hess(i,j)=hess_act
+         hess(j,i)=hess_act
+      end do
+   end do
+
 !
 !    Mass-scale the hessian for correct frequencies
 !

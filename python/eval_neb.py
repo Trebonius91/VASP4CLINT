@@ -26,6 +26,8 @@ print('''
  If the calculation already started, the files 
  'neb_frames_act.xyz' and 'neb_energies.dat' are 
  written out as well.
+ Image flags of the frames are corrected such that
+ no sudden jumps of atoms along the cell will occur. 
  No additional command line arguments are needed.
 ''')
 
@@ -225,9 +227,22 @@ for k in range(1,nframes+1):
          pos = line.rstrip().split()
          for l in range(3):
             xyz[j][l]=float(pos[l])
+# Check for image flags: store structure of last frame and compare 
+# them; if the difference in coordinates is larger than 0.5, raise 
+# or lower the coordinates of the new frame by 1.0
+   if k > 1:
+      for j in range(natoms):
+         for l in range(3):
+            if xyz[j][l]-xyz_old[j][l] > 0.5:
+               xyz[j][l] = xyz[j][l] - 1.0
+            if xyz[j][l]-xyz_old[j][l] < -0.5:   
+               xyz[j][l] = xyz[j][l] + 1.0
+
+   xyz_old = np.zeros((natoms,3)) 
+   xyz_old=xyz  
 
 # Center the geometry at the origin (COM = 0.0 , 0.0 , 0.0)
-   com_mol1 = COM(xyz,natoms,names,elements_dict,move=True)
+ #  com_mol1 = COM(xyz,natoms,names,elements_dict,move=True)
 
    os.chdir("..")
    xyz_act = np.zeros((natoms,3))
@@ -336,8 +351,22 @@ if started:
             for l in range(3):
                xyz[j][l]=float(pos[l])
 
+# Check for image flags: store structure of last frame and compare
+# them; if the difference in coordinates is larger than 0.5, raise
+# or lower the coordinates of the new frame by 1.0
+      if k > 1:
+         for j in range(natoms):
+            for l in range(3):
+               if xyz[j][l]-xyz_old[j][l] > 0.5:
+                  xyz[j][l] = xyz[j][l] - 1.0
+               if xyz[j][l]-xyz_old[j][l] < -0.5:
+                  xyz[j][l] = xyz[j][l] + 1.0
+
+      xyz_old = np.zeros((natoms,3))
+      xyz_old=xyz
+
 # Center the geometry at the origin (COM = 0.0 , 0.0 , 0.0)
-      com_mol1 = COM(xyz,natoms,names,elements_dict,move=True)
+ #     com_mol1 = COM(xyz,natoms,names,elements_dict,move=True)
 
 #
 #    Open the OSZICAR of the frame and read in the energy
