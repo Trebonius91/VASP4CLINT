@@ -88,8 +88,6 @@ write(*,*) " -rdf_bins=[number] : Number of bins for RDF evaluation (default: 20
 write(*,*) " -rdf_cutoff=[value]: Cutoff for RDF evalulation (default: 8 Angstrom)"
 write(*,*) " -frame_first=[number] : First trajectory frame that shall be evaluated by "
 write(*,*) "     the script (e.g., in order to skip equilibration parts) (default: 1)"
-write(*,*) " -dens_slices=[number] : In how many parts the z-axis shall be divided for "
-write(*,*)"      the evaluation of element densities (default: 501)."
 write(*,*) " -z_shift=[value] : The z-coordinates of the frames are shifted by the value,"
 write(*,*) "     given in direct coordinates (0 to 1.0)."
 write(*,*) " -z_val_max=[value] : Usually, the slab is assumed to be located in the lower "
@@ -227,17 +225,6 @@ do i = 1, command_argument_count()
    end if
 end do
 
-
-!
-!    The number of slices the z-axis will be divided for element densities
-!
-nbins=501
-do i = 1, command_argument_count()
-   call get_command_argument(i, arg)
-   if (trim(arg(1:13))  .eq. "-dens_slices=") then
-      read(arg(14:),*) nbins
-   end if
-end do
 
 !
 !    The element for which the CLS shall be calculated
