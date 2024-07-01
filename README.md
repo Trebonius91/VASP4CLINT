@@ -29,6 +29,7 @@ Currently included are:
  - **build_scalms.py** :  Build unit cells of liquid metal alloys on a simple cubic grid (bulk, slab and cluster possible)
  - **check_vac.py** : Checks if single atoms have departed from a surface during ML (utility for **ml_long.sh**!)
  - **eval_neb.py** : Evaluates a nudged elastic band calculation, no matter if already started or finished
+ - **integrate_dens.py** : Calculates elemental concentrations in SCALMS from elemental density distributions
  - **manage_mlff_md.py** : Starts and supervises a ML-FF trajectory of a surface slab, restarts if errors occur
  - **modify_poscar.py** : Perform several simple operations on a POSCAR file, such as shifting its atoms, multiply the cel, transform from cartesian to internal coordinates and the other way round
  - **struc_insert.py** : Insert one POSCAR (e.g. a molecule or crystal) into another POSCAR (e.g. a solvent)
