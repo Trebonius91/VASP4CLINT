@@ -1,0 +1,16 @@
+# MD Settings:
+name= GaCuPt
+NTs= 5
+T1= 400 400
+T2= 500 500 
+T3= 600 600
+T4= 700 700
+T5= 800 800
+NSW= 8000000
+dt= 2
+
+# Slurm settings:
+partition= multinode  
+nodes= 4
+cores= 144
+VASP= 6.4.2

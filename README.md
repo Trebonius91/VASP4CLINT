@@ -36,6 +36,7 @@ Currently included are:
 
 ## Bash scripts
 
+ - **manage_MDs.sh** : Management-tool for MD simulations plus example MD.in. 
  - **ml_long.sh** : Do VASP machine learning force field on-the-fly learning trajectories for arbitrary long times, even if the calculation cluster has a walltime limit.
  - **opt_long.sh** : Do a VASP geometry optimization run for arbitrary long times, even if the calculation cluster has a wallime limit
 
