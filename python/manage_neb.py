@@ -345,6 +345,62 @@ if eval_job:
       avg_forces=np.zeros((10000,nframes))
       sum_energies=np.zeros((10000,nframes))
       step_number=0
+#
+#    Check if an OUTCAR file is present in folder 00 and N+1
+#
+      energy_first=1000.0
+      path = "00"
+      os.chdir(path)
+      
+
+      if os.path.isfile("OUTCAR"):
+         os.system("grep 'energy  without entropy=' OUTCAR > grep_ens.log")
+
+         grep_in = open("grep_ens.log","r")
+         with grep_in as infile:
+            while True:
+               try:
+                  line = infile.readline()
+               except Exception as e:
+                  break
+               try:
+                  line = line.rstrip("\n")
+               except Exception as e:
+                  break
+               try:
+                  energy_first = float(line.split()[6])
+               except Exception as e:
+                  break
+ 
+      if nframes+1 < 10:
+         path = "0" + str(nframes+1)
+      else:
+         path = str(nframes+1)
+
+      os.chdir("..")
+      energy_last=1000.0
+      os.chdir(path)
+       
+
+      if os.path.isfile("OUTCAR"):
+         os.system("grep 'energy  without entropy=' OUTCAR > grep_ens.log")
+
+         grep_in = open("grep_ens.log","r")
+         with grep_in as infile:
+            while True:
+               try:
+                  line = infile.readline()
+               except Exception as e:
+                  break
+               try:
+                  line = line.rstrip("\n")
+               except Exception as e:
+                  break
+               try:
+                  energy_last = float(line.split()[6])
+               except Exception as e:
+                  break
+      os.chdir("..")
 
       for k in range(1,nframes+1):
          if k < 10:
@@ -543,6 +599,11 @@ if eval_job:
             sys.stdout = outfile
             if k == 1:
                print("# frame energies    frame energy changes") 
+#
+#    If the OUTCAR of min1 is included into folder 00
+#
+               if energy_first < 800:
+                  print(str(energy_first) + "  " + str(0.0))  
             print(str(energy_act) + "  " + str(de_act))
          sys.stdout=original_stdout   
 #
@@ -555,9 +616,19 @@ if eval_job:
             print(str(energy_act/27.2114079527))
          sys.stdout=original_stdout
 #
+#    If the OUTCAR of min2 is included into folder N+1
+#
+      with open("neb_energies.dat", "a") as outfile: 
+         sys.stdout = outfile 
+         if energy_last < 800:
+
+            print(str(energy_last) + "  " + str(0.0))
+         sys.stdout=original_stdout
+#
 #    Write energies and gradientas (average and largest component) for each 
 #     calculation step so far 
 #    
+
       print(" ")
       print(" StepNo.   total energy   avg.force/image    max.force")
       for i in range(step_number):
