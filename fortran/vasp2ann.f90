@@ -269,7 +269,7 @@ if (eval_mlff) then
    read(27,*)
    read(27,*) nstrucs
    write(*,*) "Number of structures in the ML_AB fille: ",nstrucs
-   inc=1
+   inc=0
    do
       read(27,'(a)',iostat=readstat) a160
       if (readstat .ne. 0) exit

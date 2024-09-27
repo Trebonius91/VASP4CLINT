@@ -11,7 +11,8 @@ character(len=2),allocatable::el_list_read(:)
 character(len=2),allocatable::el_list(:)
 character(len=80)::arg,adum,select_string
 character(len=80)::coord_string
-character(len=40)::foldername,a120
+character(len=40)::foldername
+character(len=120)::a120
 character(len=120),allocatable::potcar_block(:)
 integer::readstat,el_num
 integer::nelems_choice,counter,block_len
@@ -303,7 +304,7 @@ if (mode_setup) then
             potcar_block(counter)=a120
             do 
                counter=counter+1
-               read(67,'(a)') a120
+               read(67,'(a120)') a120
                potcar_block(counter)=a120
                if (index(a120,'End of Dataset') .ne. 0) exit
             end do      
@@ -314,7 +315,7 @@ if (mode_setup) then
       close(67)
       open(unit=68,file="POTCAR",status="old",access="append")
       do j=1,block_len
-         write(68,*) trim(potcar_block(j))
+         write(68,'(a120)') potcar_block(j)
       end do
       close(68)
 !
