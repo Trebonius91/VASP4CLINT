@@ -46,6 +46,7 @@ Currently included are:
  - **cut_unitcell** : Cut an arbitrary shaped surface slab unit cell from a given larger surface slab
  - **eval_bader** : Evaluates and visualizes Bader charge calculations
  - **mlff_select** : Selects basis functions for a VASP machine learning force field from given ML_AB files
+ - **manage_cls** : Prepares and evaluates core level shift calculations for many atoms in a system
  - **modify_xdatcar** : Modify XDATCAR trajectory files: shifts, multiplications, writing of xyz files
  - **split_freq** : Splits a large frequency calculation into arbitrary many parts and combine the results after finishing
  - **partial_dos** : Extract the partial density of states for certain atoms, elements or orbitals from a DOSCAR file
