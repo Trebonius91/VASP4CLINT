@@ -25,11 +25,13 @@ integer,allocatable::list_active(:)
 character(len=2),allocatable::el_active(:)
 real(kind=8)::cell_scale,a_vec(3),b_vec(3),c_vec(3)
 real(kind=8)::e_fermi
+real(kind=8)::gauss_width
 character(len=2),allocatable::el_init(:)
 character(len=2),allocatable::el_names(:)
 character(len=2),allocatable::at_names(:)
 character(len=20)::spec_name
-real(kind=8),allocatable::fs_val(:)
+real(kind=8),allocatable::fs_val(:),is_val(:),fs_is_val(:)
+real(kind=8),allocatable::fs_all(:),is_all(:),fs_is_all(:)
 real(kind=8)::dft_is_ref,dft_fs_ref,exp_ref
 integer,allocatable::el_numbers(:)
 integer::natoms,num_active
@@ -46,6 +48,10 @@ write(*,*) " prepared, in choosing the atoms whose final state energies "
 write(*,*) " shall be calculated. A POSCAR file with the structure as well"
 write(*,*) " as a INCAR (for final state calc.), KPOINTS and POTCAR file"
 write(*,*) " need to be located in the folder."
+write(*,*) " In the INCAR file, the usual keywords for a final state calc."
+write(*,*) " need to be present: CLN, CLL, CLZ, in order to specify the "
+write(*,*) " orbital and the species. The species (CLN) always needs to be"
+write(*,*) " 'number of the species in the system' + 1"
 write(*,*) "In the evaluation mode, the prepared and finished calculations"
 write(*,*) " are evaluated and the results collected such that one plot or"
 write(*,*) " picture can be produced for the whole structure."
@@ -53,18 +59,24 @@ write(*,*) " The evaluation must be called in the same folder as the setup."
 write(*,*) "The following command line arguments can/must be given:"
 write(*,*) " -setup : chooses the setup mode for a new calculation."
 write(*,*) " -eval : chooses the evaluation mode for a done calculation."
-write(*,*) " -element=[list of elements]: which element shall be analzed."
+write(*,*) " -element=[element]: which element shall be analzed."
 write(*,*) "   For each atom of the chosen element in the system, a "
 write(*,*) "   separate final state energy calculation will be done!"
-write(*,*) "   Choose 'all', if all elements/atoms shall be calculated."
 write(*,*) " -slurm : assumes that slurm is used as queue manager. A file"
 write(*,*) "   named slurm_script will be copied into each folder."
-
+write(*,*) "During the evaluation mode, Gaussian-broadened plots of the "
+write(*,*) " FS and IS and FS-IS (final state effect) spectra are made."
+write(*,*) " Optionally, they can be modified by the following keywords:"
+write(*,*) " -plot_points=[number] : Number of plot points in the spectrum"
+write(*,*) "   (default: 1000)"
+write(*,*) " -gauss_width=[value]: Exponential prefactor of the Gaussian "
+write(*,*) "   applied to broaden the lines of the spectrum (default 40.0)"
 
 
 mode_setup=.false.
 mode_eval=.false.
 npoints=1000
+gauss_width=40.d0
 !
 !     Determine calculation mode
 !
@@ -150,7 +162,7 @@ if (cls_elements) then
    end if
 end if
 if (nelems_choice .lt. 1 .and. mode_setup) then
-   write(*,*) "Please give at least one element with the -element command!"
+   write(*,*) "Please give one element with the -element command!"
    stop
 end if        
 
@@ -162,6 +174,42 @@ do i = 1, command_argument_count()
       use_slurm=.true.
    end if
 end do
+
+npoints=1000
+gauss_width=40.0
+if (mode_eval) then
+   do i = 1, command_argument_count()
+      call get_command_argument(i, arg)
+      if (trim(arg(1:13))  .eq. "-plot_points=") then
+         read(arg(14:),*,iostat=readstat) npoints
+         if (readstat .ne. 0) then
+            write(*,*)
+            stop "Check the command -plot_points=..., something went wrong!"
+            write(*,*)
+         end if
+      end if
+   end do 
+   if (npoints .ne. 1000) then
+      write(*,*) " - The number of plot points has been set to ",npoints
+   end if
+
+
+   do i = 1, command_argument_count()
+      call get_command_argument(i, arg)
+      if (trim(arg(1:13))  .eq. "-gauss_width=") then
+         read(arg(14:),*,iostat=readstat) gauss_width
+         if (readstat .ne. 0) then
+            write(*,*)
+            stop "Check the command -gauss_width=..., something went wrong!"
+            write(*,*)
+         end if
+      end if
+   end do
+   if ((gauss_width - 40d0) .gt. 0.0001d0) then
+      write(*,*) " - The width of line broadening Gaussians has been set to ",gauss_width
+   end if
+end if
+
 
 
 !
@@ -197,10 +245,19 @@ end do
 allocate(el_numbers(el_num))
 read(56,*) el_numbers
 natoms=sum(el_numbers)
-read(56,'(a)') select_string
-read(56,'(a)') coord_string
-
-
+read(56,*) adum
+!
+!    Read coordinate section for final PDB printout of structure
+!
+coord_direct=.false.
+if (adum .eq. "Selective" .or. adum .eq. "selective") then
+   read(56,*) adum
+   if (adum .eq. "Direct" .or. adum .eq. "direct") then
+      coord_direct=.true.
+   end if
+else if (adum .eq. "Direct" .or. adum .eq. "direct") then
+   coord_direct=.true.
+end if
 
 allocate(xyz(3,natoms))
 allocate(xyz_print(3,natoms))
@@ -244,7 +301,6 @@ if (mode_setup) then
 !    Determine the number and indices of the atoms that 
 !    shall be calculated
 !
-   write(*,*) at_names
    counter=1
    do i=1,nelems_choice
       do j=1,natoms
@@ -262,19 +318,57 @@ if (mode_setup) then
    do i=1,num_active
       write(57,*) list_active(i),el_active(i)
    end do
-   write(*,*) "File active_list.dat written."
+   write(*,*) "File active_list.dat written. (used for the eval mode!)"
 !
-!    Now, setup a calculation folder for each selected atom!
+!    Setup the IS calculation folder
+!    One calculation is sufficient for the whole system!
+!
+   call system("mkdir IS")
+   call chdir("IS")
+   call system("cp ../KPOINTS .")
+   call system("cp ../INCAR .")
+   call system("cp ../POTCAR .")
+   call system("cp ../POSCAR .")
+   if (use_slurm) then
+      call system("cp ../slurm_script .")
+   end if  
+!
+!    Order a initial state (ICORELEVEL = 1) calculation
+!
+   call system("sed -i '/ICORELEVEL/c\ICORELEVEL = 1' INCAR")   
+
+   write(*,*)
+   write(*,*) "Global initial state calculation prepared in folder IS"
+!
+!     Start the calculation if the slurm_script usage is activated
+!
+   if (use_slurm) then
+      call system("sbatch slurm_script")
+      call system("sleep 0.5")
+      write(*,*) "IS calculation has started!"
+   end if
+
+   call chdir("..")
+
+  
+
+!
+!    Now, setup a FS calculation folder for each selected atom!
 !    In the respective POSCAR, the atom is printed in the last 
 !    line
 !    Further, a new species is added to the POTCAR file, resembling
 !    the element of the atom in the last line
 !
+
+   write(*,*)
+   write(*,*) "Final state calculations for all active atoms of the "
+   write(*,*) " chosen element prepared in folders:"
  
    allocate(potcar_block(8000))
    do i=1,num_active
       write(foldername,*) list_active(i)
       call system("mkdir " // adjustl(trim(foldername)))
+      write(*,'(a,i4,a,a)') "   calculation ",i,":     ", trim(foldername)
       call chdir(adjustl(trim(foldername)))
       call system("cp ../KPOINTS .")
       call system("cp ../INCAR .")
@@ -353,6 +447,17 @@ if (mode_setup) then
       call chdir("..")
 
    end do
+   if (use_slurm) then
+      write(*,*) "Final state calculations started!"
+   else
+      write(*,*) "Please go into all generated folders and start the calculations"
+      write(*,*) " manually, or add the -slurm option and a slurm_script in the "
+      write(*,*) " main folder."
+   end if
+
+   write(*,*)
+   write(*,*) "Wait until all calculations are finished, then, run this program"
+   write(*,*) " again, now in the -eval mode."
 end if        
 
 !
@@ -382,18 +487,28 @@ if (mode_eval) then
    allocate(list_active(num_active))
    allocate(el_active(num_active))
 !
-!     The array with the final state energies
+!     The array with the initial and final state energies
 !
    allocate(fs_val(num_active))
+   allocate(is_val(num_active))
+   allocate(fs_is_val(num_active))
+   allocate(fs_all(natoms))
+   allocate(is_all(natoms))
+   allocate(fs_is_all(natoms))
 
+
+   write(*,*) "List of atoms that were calculated:"
    open(unit=57,file="active_list.dat",status="old")
    read(57,*)
+   write(*,*) "(number    atom index     element)"
    do i=1,num_active
       read(57,*) list_active(i),el_active(i)
+      write(*,'(a,i5,a,i5,a,a,a)') " - ",i,":     ",list_active(i),"    &
+     &       (",trim(el_active(i)),")"
    end do
    close(57)
-
 !
+!     Read in the FS results for each atom, separately
 !     Loop through folders of calculations
 !
    do i=1,num_active
@@ -424,7 +539,17 @@ if (mode_eval) then
             write(*,*) "The l quantum number has not been given in the INCAR file!"
             stop
          end if
-         write(*,*) "quantum",quantum_n,quantum_l
+         write(*,*) "The chosen quantum numbers are: "
+         write(*,'(a,i1)') "  - N = ",quantum_n
+         if (quantum_l .eq. 0) then
+            write(*,'(a,i1,a)') "  - L = ",quantum_l," (s)"
+         else if (quantum_l .eq. 1) then
+            write(*,'(a,i1,a)') "  - L = ",quantum_l," (p)"
+         else if (quantum_l .eq. 2) then
+            write(*,'(a,i1,a)') "  - L = ",quantum_l," (d)"
+         else if (quantum_l .eq. 3) then
+            write(*,'(a,i1,a)') "  - L = ",quantum_l," (f)"
+         end if   
       end if
 !
 !     Open OUTCAR file and read in core level energies for current index
@@ -520,6 +645,105 @@ if (mode_eval) then
 
       call chdir("..")
    end do
+
+!
+!     Now read in the IS results of all atoms, for the same orbitals as the 
+!     FS calculations
+!
+   call chdir("IS")
+   do i=1,num_active
+      if (list_active(i) .lt. 10) then
+         write(spec_name,'(i1,a)') list_active(i),"-"
+      else if (list_active(i) .lt. 100) then
+         write(spec_name,'(i2,a)') list_active(i),"-"
+      else if (list_active(i) .lt. 1000) then
+         write(spec_name,'(i3,a)') list_active(i),"-"
+      end if
+      open(unit=47,file="OUTCAR",status="old")
+      do
+         read(47,'(a)',iostat=readstat) a120
+         if (readstat .ne. 0) exit
+         if (index(a120,trim(spec_name)) .ne. 0) then
+!
+!     Depending on the N and L quantum numbers of the core level, determine
+!      the position of the number to be read in
+!
+!     The 1s orbital
+            if (quantum_n .eq. 1 .and. quantum_l .eq. 0) then
+               read(a120,*) adum,adum,is_val(i)
+!     The 2s orbital
+            else if (quantum_n .eq. 2 .and. quantum_l .eq. 0) then
+               read(a120,*) adum,adum,adum,adum,is_val(i)
+!     The 2p orbital
+            else if (quantum_n .eq. 2 .and. quantum_l .eq. 1) then
+               read(a120,*) adum,adum,adum,adum,adum,adum,is_val(i)
+!     The 3s orbital
+            else if (quantum_n .eq. 3 .and. quantum_l .eq. 0) then
+               read(a120,*) adum,adum,adum,adum,adum,adum,adum,adum,is_val(i)
+!     The 3p orbital
+            else if (quantum_n .eq. 3 .and. quantum_l .eq. 1) then
+               read(a120,*) adum,adum,adum,adum,adum,adum,adum,adum,adum,adum,is_val(i)
+!     The 3d orbital
+            else if (quantum_n .eq. 3 .and. quantum_l .eq. 2) then
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,is_val(i)
+!     The 4s orbital
+            else if (quantum_n .eq. 4 .and. quantum_l .eq. 0) then
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,is_val(i)
+!     The 4p orbital
+            else if (quantum_n .eq. 4 .and. quantum_l .eq. 1) then
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,adum,adum,is_val(i)
+!     The 4d orbital
+            else if (quantum_n .eq. 4 .and. quantum_l .eq. 2) then
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,adum,adum,adum,adum,is_val(i)
+!     The 4f orbital
+            else if (quantum_n .eq. 4 .and. quantum_l .eq. 3) then
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,adum,adum,adum,adum,adum,adum,is_val(i)
+!     The 5s orbital
+            else if (quantum_n .eq. 5 .and. quantum_l .eq. 0) then
+               read(47,'(a)',iostat=readstat) a120
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,is_val(i)
+!     The 5p orbital
+            else if (quantum_n .eq. 5 .and. quantum_l .eq. 1) then
+               read(47,'(a)',iostat=readstat) a120
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,is_val(i)
+!     The 5d orbital
+            else if (quantum_n .eq. 5 .and. quantum_l .eq. 2) then
+               read(47,'(a)',iostat=readstat) a120
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,adum,adum,is_val(i)
+!     The 5f orbital
+            else if (quantum_n .eq. 5 .and. quantum_l .eq. 3) then
+               read(47,'(a)',iostat=readstat) a120
+               read(47,'(a)',iostat=readstat) a120
+               read(a120,*) adum,adum,adum,adum,adum,adum,adum,is_val(i)
+
+            end if
+         end if
+!
+!     Read in the Fermi energy for the correct shift in energy
+!
+         if (index(a120,"Fermi energy:") .ne. 0) then
+            read(a120,*) adum,adum,e_fermi
+         end if
+      end do
+!
+!     Calculate the current initial state energy, in the same scale as experiment
+!
+
+      is_val(i)=-(is_val(i)-e_fermi)
+
+      close(47)
+   end do
+
+   call chdir("..")
+
 !
 !     Reference the CLS values to the experimental XPS data
 !
@@ -535,17 +759,21 @@ if (mode_eval) then
          dft_fs_ref=21.9421
          exp_ref=18.7d0
       end if
-      
+
       fs_val(i)=fs_val(i)-dft_fs_ref+exp_ref
+      is_val(i)=is_val(i)-dft_is_ref+exp_ref
+      fs_is_val(i)=fs_val(i)-is_val(i)
    end do
 
 !
 !     Produce Gaussian-broadened spectrum of core levels for comparison with experiment
 !
+!     The final state:
+!
 !     First, determine plot-limits
 !
-   x_lo=real(floor(minval(fs_val)))
-   x_hi=real(ceiling(maxval(fs_val)))
+   x_lo=real(floor(minval(fs_val)))-1.d0
+   x_hi=real(ceiling(maxval(fs_val)))+1.d0
    deltax=(x_hi-x_lo)/real(npoints)
 
    open(unit=57,file="plot_fs.dat",status="replace")
@@ -555,38 +783,123 @@ if (mode_eval) then
       x_act=x_lo+(i-1)*deltax
       y_act=0
       do j=1,num_active
-         y_act=y_act+exp(-(x_act-fs_val(j))**2*40.0)
+         y_act=y_act+exp(-(x_act-fs_val(j))**2*gauss_width)
+      end do
+      write(57,*) x_act,y_act
+   end do
+   close(57)
+!
+!     The initial state:
+!
+   x_lo=real(floor(minval(is_val)))-1.d0
+   x_hi=real(ceiling(maxval(is_val)))+1.d0
+   deltax=(x_hi-x_lo)/real(npoints)
+
+   open(unit=57,file="plot_is.dat",status="replace")
+   write(57,*) "# This file contains a initial state CLS spectrum for the current system"
+   write(57,*) "# Produced by the script manage_cls, part of VASP4CLINT"
+   do i=1,npoints
+      x_act=x_lo+(i-1)*deltax
+      y_act=0
+      do j=1,num_active
+         y_act=y_act+exp(-(x_act-is_val(j))**2*gauss_width)
       end do
       write(57,*) x_act,y_act
    end do
    close(57)
 
 !
+!     The final state effect (FS-IS):
+!
+   x_lo=real(floor(minval(fs_is_val)))-1.d0
+   x_hi=real(ceiling(maxval(fs_is_val)))+1.d0
+   deltax=(x_hi-x_lo)/real(npoints)
+
+   open(unit=57,file="plot_fs-is.dat",status="replace")
+   write(57,*) "# This file contains a final state effect (FS-IS) spectrum for the current system"
+   write(57,*) "# Produced by the script manage_cls, part of VASP4CLINT"
+   do i=1,npoints
+      x_act=x_lo+(i-1)*deltax
+      y_act=0
+      do j=1,num_active
+         y_act=y_act+exp(-(x_act-fs_is_val(j))**2*gauss_width)
+      end do
+      write(57,*) x_act,y_act
+   end do
+   close(57)
+
+   write(*,*) 
+   write(*,*) "Files for Gaussian-broadened spectra of CLS values written:"
+   write(*,*) " - plot_fs.dat : Final state values "
+   write(*,*) " - plot_is.dat : Initial state values "
+   write(*,*) " - plot_fs-is.dat : Final state effect values "
+!
+!     Fill arrays with CLS values, spanning all atoms of the system
+!
+   fs_all=0.d0
+   is_all=0.d0
+   fs_is_all=0.d0
+   do i=1,num_active
+      fs_all(list_active(i))=fs_val(i)
+      is_all(list_active(i))=is_val(i)
+      fs_is_all(list_active(i))=fs_is_val(i)
+   end do
+
+!
 !     Print out PDB file for coloring of atoms by their CLS
 !     (can be visualized with VMD)
 !
-open(unit=20,file="show_fs.pdb")
-write(20,'(a)') "COMPND    FINAL HEAT OF FORMATION =     0.000000"
-write(20,'(a)') "AUTHOR    GENERATED BY PROGRAM EVAL BADER"
-do i=1,natoms
-   write(20,'(a,i5,a,a,a,3f8.3,f7.3,f5.2,a,a)') "HETATM",i," ",el_names(i), &
-                 & "   UNL     1    ",xyz_print(:,i),fs_val(i),0d0,"          ",el_names(i)
-end do
-write(20,*) "MASTER        0    0    0    0    0    0    0    0  180    0  180    0"
-write(20,*) "END"
-close(20)
-write(*,*) "File with coordinates and charges written to 'charges.pdb'"
-write(*,*) " Open this file with VMD and select 'coloring method: occupancy'"
+!     The FS values
+!
+   open(unit=20,file="show_fs.pdb")
+   write(20,'(a)') "COMPND    FINAL HEAT OF FORMATION =     0.000000"
+   write(20,'(a)') "AUTHOR    GENERATED BY PROGRAM MANAGE CLS"
+   do i=1,natoms
+      write(20,'(a,i5,a,a,a,3f8.3,f7.3,f5.2,a,a)') "HETATM",i," ",at_names(i), &
+                 & "   UNL     1    ",xyz_print(:,i),fs_all(i),0d0,"          ",at_names(i)
+   end do
+   write(20,*) "MASTER        0    0    0    0    0    0    0    0  180    0  180    0"
+   write(20,*) "END"
+   close(20)
+!
+!     The IS values
+!
+   open(unit=20,file="show_is.pdb")
+   write(20,'(a)') "COMPND    FINAL HEAT OF FORMATION =     0.000000"
+   write(20,'(a)') "AUTHOR    GENERATED BY PROGRAM MANAGE CLS"
+   do i=1,natoms
+      write(20,'(a,i5,a,a,a,3f8.3,f7.3,f5.2,a,a)') "HETATM",i," ",at_names(i), &
+                 & "   UNL     1    ",xyz_print(:,i),is_all(i),0d0,"          ",at_names(i)
+   end do
+   write(20,*) "MASTER        0    0    0    0    0    0    0    0  180    0  180    0"
+   write(20,*) "END"
+   close(20)
+!
+!     The FS-IS values (final state effect)
+!
+   open(unit=20,file="show_fs.pdb")
+   write(20,'(a)') "COMPND    FINAL HEAT OF FORMATION =     0.000000"
+   write(20,'(a)') "AUTHOR    GENERATED BY PROGRAM MANAGE CLS"
+   do i=1,natoms
+      write(20,'(a,i5,a,a,a,3f8.3,f7.3,f5.2,a,a)') "HETATM",i," ",at_names(i), &
+                 & "   UNL     1    ",xyz_print(:,i),fs_is_all(i),0d0,"          ",at_names(i)
+   end do
+   write(20,*) "MASTER        0    0    0    0    0    0    0    0  180    0  180    0"
+   write(20,*) "END"
+   close(20)
 
+   write(*,*)
+   write(*,*) "Files for spatial visualization of CLS values written:"
+   write(*,*) " - show_fs.pdb : Final state values "
+   write(*,*) " - show_is.pdb : Initial state values "
+   write(*,*) " - show_fs-is.pdb : Final state effect values "
+   write(*,*) " Open these files with VMD and select 'coloring method: occupancy'"
 
 end if
 
-
-
-
-
-
-
+write(*,*)
+write(*,*) "manage_cls terminated normally."
+write(*,*)
 
 
 end program manage_cls        
