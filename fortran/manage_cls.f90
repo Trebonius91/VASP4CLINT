@@ -890,9 +890,12 @@ if (mode_eval) then
 
    write(*,*)
    write(*,*) "Files for spatial visualization of CLS values written:"
-   write(*,*) " - show_fs.pdb : Final state values "
-   write(*,*) " - show_is.pdb : Initial state values "
-   write(*,*) " - show_fs-is.pdb : Final state effect values "
+   write(*,'(a,f10.5,a,f10.5,a)') " - show_fs.pdb : Final state values (range: ", &
+             & minval(fs_val),"  to ",maxval(fs_val),")"
+   write(*,'(a,f10.5,a,f10.5,a)') " - show_is.pdb : Initial state values (range: ", &
+             & minval(is_val),"  to ",maxval(is_val),")"
+   write(*,'(a,f10.5,a,f10.5,a)') " - show_fs-is.pdb : Final state effect values (range: ", &
+             & minval(fs_is_val),"  to ",maxval(fs_is_val),")"
    write(*,*) " Open these files with VMD and select 'coloring method: occupancy'"
 
 end if
