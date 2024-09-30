@@ -633,14 +633,15 @@ write(*,*)
 
 !
 !    Determine lowest and highest z-values in the coordinates 
+!    MOD: Now o to zmax from POSCAR header
 !
-zlo = minval(xyz(3,:,:))
-zhi = maxval(xyz(3,:,:))
+zlo = 0.d0 ! minval(xyz(3,:,:))
+zhi = zmax !maxval(xyz(3,:,:))
 !write(*,*) "z-borders were defined manually!"
 !zlo = -2.63d0
 !zhi = 39.31d0
-write(*,*) "Lowest z-value during dynamics: ",zlo
-write(*,*) "Highest z-value during dynamics: ",zhi
+write(*,*) "Lowest z-value for evaluation: ",zlo
+write(*,*) "Highest z-value for evaluation: ",zhi
 write(*,*)
 
 zdiff = zhi-zlo
