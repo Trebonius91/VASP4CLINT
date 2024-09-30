@@ -636,7 +636,7 @@ write(*,*)
 !    MOD: Now o to zmax from POSCAR header
 !
 zlo = 0.d0 ! minval(xyz(3,:,:))
-zhi = zmax !maxval(xyz(3,:,:))
+zhi = zlen !maxval(xyz(3,:,:))
 !write(*,*) "z-borders were defined manually!"
 !zlo = -2.63d0
 !zhi = 39.31d0
