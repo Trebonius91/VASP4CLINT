@@ -676,6 +676,37 @@ write(*,*) "Execute gnuplot to obtain image (stm_plot.png) ..."
 call system("gnuplot stm_plot.gnu")
 write(*,*) " done!"
 write(*,*)
+!
+!    Write second gnuplot file for plot without axis labels or tics
+!
+write(*,*) "Write gnuplot file for 2D plot wihtout axis labels (stm_plot_blank.gnu) ..."
+xtoy=(x_plot_max-x_plot_min)/(y_plot_max-y_plot_min)
+open(unit=38,file="stm_plot_blank.gnu",status="replace")
+write(38,*) "# This file generates a png picture from 'stm_plot.dat'."
+write(38,*) "set terminal png size 2400,",nint(2400/xtoy)," lw 3.5 font 'Helvetica,46'"
+write(38,*) "set output 'stm_plot_blank.png'"
+write(38,*) "set encoding iso_8859_1"
+write(38,*) "set lmargin screen 0.0"
+write(38,*) "set rmargin screen 1.0"
+write(38,*) "set tmargin screen 0.0"
+write(38,*) "set bmargin screen 1.0"
+write(38,*) "set xrange [",x_plot_min,":",x_plot_max,"]"
+write(38,*) "set yrange [",y_plot_min,":",y_plot_max,"]"
+write(38,*) "unset xtics"
+write(38,*) "unset ytics"
+write(38,*) "unset cbtics"
+write(38,*) "unset colorbox"
+
+write(38,*) "set palette gray"
+write(38,*) "set pm3d map interpolate 0,0"
+write(38,*) "splot 'stm_plot.dat' with pm3d notitle"
+close(38)
+
+write(*,*) " done!"
+write(*,*) "Execute gnuplot to obtain image without labels (stm_plot_blank.png) ..."
+call system("gnuplot stm_plot_blank.gnu")
+write(*,*) " done!"
+write(*,*)
 write(*,*) "eval_stm has finished all tasks, goodbye!"
 write(*,*)
 
