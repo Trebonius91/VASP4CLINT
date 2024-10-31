@@ -396,7 +396,7 @@ if (mode_setup) then
       end do
       write(45,'(a3,i8)',advance="no") "   ",1
       write(45,*)
-      write(45,*) coord_string
+      write(45,*) "Direct"
 !
 !     Write the coordinate section, move the line of the active atom
 !     to the last line
@@ -568,7 +568,7 @@ if (mode_eval) then
       do
          read(47,'(a)',iostat=readstat) a120
          if (readstat .ne. 0) exit
-         if (index(a120," "//trim(spec_name)) .ne. 0) then  
+         if (index(a120," "//trim(spec_name)//" ") .ne. 0) then  
 !
 !     Depending on the N and L quantum numbers of the core level, determine
 !      the position of the number to be read in
@@ -665,7 +665,7 @@ if (mode_eval) then
       do
          read(47,'(a)',iostat=readstat) a120
          if (readstat .ne. 0) exit
-         if (index(a120," "//trim(spec_name)) .ne. 0) then
+         if (index(a120," "//trim(spec_name)//" ") .ne. 0) then
 !
 !     Depending on the N and L quantum numbers of the core level, determine
 !      the position of the number to be read in

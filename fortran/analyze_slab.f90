@@ -47,7 +47,7 @@ real(kind=8),allocatable::z_dens(:,:),z_dens_tot(:)
 real(kind=8)::zlo,zhi,zdiff,zstep  ! borders of z-density bins 
 character(len=2),allocatable::at_names(:)  ! the element symbols
 logical::write_traj,read_dt
-logical::calc_rdf,calc_diff
+logical::calc_rdf,calc_diff,diff_2d
 logical::use_reaxff,el_present
 logical::surf_tension
 logical::skip_xdat
@@ -106,6 +106,8 @@ write(*,*) " -tension : calculates the surface tension averaged over all MD fram
 write(*,*) "     For this, the OUTCAR file needs to be present (MD with ISIF=2)"
 write(*,*) " -diffusion : calculates the diffusion coefficient, for each element in the slab"
 write(*,*) "     separately, via the mean square displacement (MSD)."
+write(*,*) " -diff_2d : calculates the 2D-diffusion coefficient along x and y, for each element"
+write(*,*) "     in the slab separately, via the mean square displacement (MSD)."
 write(*,*) " -timestep=[value] : For diffusion calculations, the time step in fs (consider"
 write(*,*) "     a longer step if not every step was written during dynamics!)"
 
@@ -282,6 +284,18 @@ do i = 1, command_argument_count()
    end if
 end do
 
+!
+!    Activates the calclation of two-dimensional diffusion coefficients
+!
+
+diff_2d=.false.
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg)  .eq. "-diff_2d") then
+      calc_diff=.true.
+      diff_2d=.true.
+   end if
+end do
 
 
 if (calc_diff) then
@@ -632,7 +646,7 @@ write(*,*)
 
 
 !
-!    Determine lowest and highest z-values in the coordinates 
+!    Determine lowest and highest z-values in the coordinates
 !    MOD: Now o to zmax from POSCAR header
 !
 zlo = 0.d0 ! minval(xyz(3,:,:))
@@ -1100,7 +1114,11 @@ end if
 !     Calculates the diffusion coeffients for each element (self-diffusion)
 !
 if (calc_diff) then
-   write(*,*) "Calculate the diffusion coefficients of all elements..."
+   if (diff_2d) then
+      write(*,*) "Calculate the diffusion coefficients of all elements..."
+   else 
+      write(*,*) "Calculate the 2D diffusion coefficients of all elements..."
+   end if        
    allocate(xyz2(3,natoms,nframes))
    allocate(pos_diff(natoms*3))
    allocate(msd_func(nframes-frame_first,nelems))
@@ -1156,10 +1174,17 @@ if (calc_diff) then
    end if        
    do i=1,nframes-frame_first
       times(i)=(i-1)*time_step
+      pos_diff=0.d0
       do j=1,natoms
-         do k=1,3
-            pos_diff((j-1)*3+k)=xyz2(k,j,i+frame_first)-xyz2(k,j,1+frame_first)
-         end do
+         if (diff_2d) then
+            do k=1,2
+               pos_diff((j-1)*3+k)=xyz2(k,j,i+frame_first)-xyz2(k,j,1+frame_first)
+            end do
+         else 
+            do k=1,3
+               pos_diff((j-1)*3+k)=xyz2(k,j,i+frame_first)-xyz2(k,j,1+frame_first)
+            end do
+         end if        
       end do
       if (nelems .eq. 1) then
          msd_func(i,1)=dot_product(pos_diff,pos_diff)/natoms
@@ -1228,7 +1253,11 @@ if (calc_diff) then
 !
    do k=1,nelems
       do i=1,nframes-frame_first
-         diff(i)=msd_func(i,k)/(6.d0*times(i))
+         if (diff_2d) then
+            diff(i)=msd_func(i,k)/(4.d0*times(i))
+         else        
+            diff(i)=msd_func(i,k)/(6.d0*times(i))
+         end if
       end do
       diff = diff*(1E-10)**2/(1E-15)
       avg_diff=diff(nframes-frame_first)
