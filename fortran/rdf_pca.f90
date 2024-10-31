@@ -20,6 +20,7 @@ integer::i,j,k,l,m,q
 integer::readstat
 integer::nstarts,nframes
 integer::nlines,nlines2,idum,nlines_old
+integer::lines_maxdist,lines_cancel
 real(kind=8)::adum
 character(len=100)::arg
 character(len=2)::indname
@@ -31,6 +32,7 @@ real(kind=8),allocatable::weights_best(:)
 real(kind=8),allocatable::x_vals(:)
 real(kind=8)::err_sum,sum1
 real(kind=8)::err_sum_best,err_sum_best2
+real(kind=8)::rdf_maxdist
 real(kind=8),allocatable::fvec(:),rdf_approx(:)
 real(kind=8),allocatable::fvec_best(:)
 real(kind=8),allocatable::rdf_weight(:,:)
@@ -59,6 +61,9 @@ write(*,*) " -rdf_file=[filename] : The analyzed RDF profile"
 write(*,*) " -ref1=[filename1] -rdf2=[filename2] ... : The reference RDFs"
 write(*,*) "Further, the number of multi start local search (MSLS) starts "
 write(*,*) " can be given (default value: 100): -msls_starts=[number]"
+write(*,*) "If the integrated RDF interval shall be smaller than given in the"
+write(*,*) " input files, add the following keyword, defining the distance:"
+write(*,*) " -rdf_maxdist=[value]   (distance in Angstroms)"
 write(*,*) 
 
 
@@ -124,6 +129,18 @@ do i = 1, command_argument_count()
    end if
 end do
 
+!
+!     The maximum distance in the RDF plots
+!
+rdf_maxdist=100d0
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:13))  .eq. "-rdf_maxdist=") then
+      read(arg(14:),*,iostat=readstat) rdf_maxdist
+   end if
+end do
+
+
 
 if (ref_num .lt. 2) then
    write(*,*) "Please give at last two reference RDF profiles!"
@@ -153,17 +170,19 @@ count_lines=.true.
 do
    adum=1D17
    read(34,'(a)',iostat=readstat) cdum
+   if (readstat .ne. 0) exit
    if (len(trim(cdum)) .lt. 5) then
       count_lines = .false.
       read(34,*,iostat=readstat) idum,adum,adum
       if (readstat .ne. 0) exit   
+      nlines=nlines-1
    end if
    if (count_lines) then
       nlines=nlines+1
    end if
    nlines2=nlines2+1
 end do
-nframes=int(nlines2/(nlines+1))
+nframes=int(nlines2/(nlines))
 
 
 close(34)
@@ -187,7 +206,6 @@ do i=1,nframes
    end do
 end do
 close(34)
-
 !
 !     Read in the principial component RDF curves
 !
@@ -204,20 +222,35 @@ do i=1,ref_num
 end do
 
 !
+!     If the rdf_maxdist keyword is given, determine the number of data points
+!     (1 to N <= M) that are still within the given distance range 
+!     The Levenberg-Marquardt optimization will only be done within the range
+!
+lines_cancel=0
+lines_maxdist=0
+if (rdf_maxdist .lt. 100d0) then
+   do i=1,nlines
+      if (x_vals(i) .gt. rdf_maxdist) exit
+      lines_maxdist=lines_maxdist+1
+   end do
+   lines_cancel=nlines-lines_maxdist
+end if        
+
+!
 !     now perform the multi start local search optimization of 
 !     principial component weights
 !
 allocate(weights(ref_num))
 allocate(deriv(ref_num))
-allocate(fvec(nlines))
-allocate(fvec_best(nlines))
+allocate(fvec(nlines-lines_cancel))
+allocate(fvec_best(nlines-lines_cancel))
 allocate(weights_best(ref_num))
 allocate(rdf_approx(nlines))
 allocate(rdf_weight(nlines,ref_num))
 allocate(weigh_best(ref_num,nframes))
 allocate(err_best(nframes))
 iwa=ref_num
-lwa=nlines*ref_num+5*ref_num+nlines+1000
+lwa=(nlines-lines_cancel)*ref_num+5*ref_num+(nlines-lines_cancel)+1000
 allocate(wa(lwa))
 tol=1E-4
 
@@ -229,7 +262,7 @@ do q=1,nframes
    frame_act=q
    do p=1,msls_starts
       iwa=ref_num
-      lwa=nlines*ref_num+5*ref_num+nlines+1000
+      lwa=(nlines-lines_cancel)*ref_num+5*ref_num+(nlines-lines_cancel)+1000
       tol=1E-4
 !
 !     Random initialize weights (sum needs not to be 1 always)
@@ -247,13 +280,13 @@ do q=1,nframes
 !      current random weights
 !
 !   call r8vec_print (ref_num, weights, '  Initial parameter values:' )
-      call lmdif1(error_function,nlines,ref_num,weights,fvec,tol,info,iwa,wa,lwa)
+      call lmdif1(error_function,nlines-lines_cancel,ref_num,weights,fvec,tol,info,iwa,wa,lwa)
 !   
 !     Calculate error sum for current coordinate vector
 !
 !   call r8vec_print (ref_num, weights, '  Optimized parameter values:' )
       err_sum=0.d0
-      do jind=1,nlines
+      do jind=1,nlines-lines_cancel
          err_sum=err_sum+fvec(jind)**2
       end do
 !
