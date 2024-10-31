@@ -175,13 +175,14 @@ do
       count_lines = .false.
       read(34,*,iostat=readstat) idum,adum,adum
       if (readstat .ne. 0) exit   
-      nlines=nlines-1
+      nlines2=nlines2-1
    end if
    if (count_lines) then
       nlines=nlines+1
    end if
    nlines2=nlines2+1
 end do
+
 nframes=int(nlines2/(nlines))
 
 
@@ -259,6 +260,7 @@ err_sum_best2=1000000d0
 err_best=1000000d0
 weigh_best=1.0d0
 do q=1,nframes
+   write(*,'(a,i8,a,i8,a)') "  Frame No. ",q," of ", nframes, " ..."
    frame_act=q
    do p=1,msls_starts
       iwa=ref_num
@@ -274,7 +276,6 @@ do q=1,nframes
          call random_number(weights(jind))
          weights(jind)=weights(jind)!*5d0
       end do
-
 !
 !     Perform the Levenberg Maraquardt optimization starting with the 
 !      current random weights
@@ -292,8 +293,10 @@ do q=1,nframes
 !
 !     If better local minimum has been found, store its values for global minimum
 !
-      if (err_sum .lt. err_best(1)) then
-         write(*,'(a,i6,a,f17.10)') " STEP ",p,": New best error sum: ",err_sum
+      if (err_sum .lt. err_best(q)) then
+         if (nframes .lt. 10) then
+            write(*,'(a,i6,a,f17.10)') " STEP ",p,": New best error sum: ",err_sum
+         end if
          err_best(q)=err_sum
          weigh_best(:,q)=weights        
       end if
