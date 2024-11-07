@@ -31,7 +31,9 @@ print('''
      fractional coordinates 
   -freeze=elems : Set all atoms belonging to a list of elements to F F F,
      for example for frequency calculations, where a surface is kept fix.
-     Example: freeze=Pt,O (Pt and O atoms will be kept fix)
+     Example: freeze=Pt,O (Pt and O atoms will be kept fix) 
+  -select_el=elems : Select all elements whose atoms shall be modified,
+     for example with a shift command. Same syntax as for freeze"
   -bottom=value : Set all atoms below the z-coordinate 'value' to F F F,
      for example for optimizations on surfaces, where the lower two layers
      are kept fix. Depending on the input format of the POSCAR, the value
@@ -56,6 +58,7 @@ freeze=False
 cart2frac=False
 writexyz=False
 bottom=False
+select_el=False
 
 # Read in the command line arguments
 for arg in sys.argv:
@@ -73,6 +76,9 @@ for arg in sys.argv:
       if param == "-freeze":
          freeze_list=actval.split(",")
          freeze=True
+      if param == "-select_el":
+         select_list=actval.split(",")
+         select_el=True
       if param == "-bottom":
          freeze_bottom=float(actval)
          bottom=True
@@ -197,6 +203,18 @@ if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2fra
    xyz_new=xyz
    select_new=coord_select
 
+# For elements selected for shift or other operations: generate boolean mask with 
+#  indices of atoms that are one of the chosen elements
+
+select_mask=True
+if select_el:
+   select_mask=[] 
+   for name in names:
+      select_act=False
+      for selected in select_list:
+         if name == selected:
+            select_act=True
+      select_mask.append(select_act)
 
 
 # Define coordinate transformation as functions in order to use them intermediately!
@@ -282,7 +300,10 @@ if shift_job:
       xyz = trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec)
       for i in range(natoms):
          for j in range(3):
-            xyz_new[i][j] = xyz[i][j] + shift_vec[j]
+            if select_mask[i]: 
+               xyz_new[i][j] = xyz[i][j] + shift_vec[j]
+            else:  
+               xyz_new[i][j] = xyz[i][j] 
             if xyz[i][j] < 0.0:
                xyz_new[i][j] = xyz_new[i][j] + 1.0
             if xyz[i][j] > 1.0:
@@ -294,7 +315,10 @@ if shift_job:
    else:
       for i in range(natoms):
          for j in range(3):
-            xyz_new[i][j] = xyz[i][j] + shift_vec[j]
+            if select_mask[i]: 
+               xyz_new[i][j] = xyz[i][j] + shift_vec[j]
+            else:   
+               xyz_new[i][j] = xyz[i][j] 
             if xyz[i][j] < 0.0:
                xyz_new[i][j] = xyz_new[i][j] + 1.0
             if xyz[i][j] > 1.0:
