@@ -557,6 +557,7 @@ if (mode_eval) then
 !     Open OUTCAR file and read in core level energies for current index
 !     It is assumed that the "active" atom is always the last one!
 !
+      write(*,*) natoms
       if (natoms .lt. 10) then
          write(spec_name,'(i1,a)') natoms,"-"
       else if (natoms .lt. 100) then

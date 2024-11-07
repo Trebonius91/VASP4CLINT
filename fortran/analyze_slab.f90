@@ -2,7 +2,7 @@
 !    analyze_slab: Analyze VASP or LAMMPS simulations of 
 !      surface slab systems from trajectories, calculates several
 !      useful measures like averaged element densities orthogonal
-!      to the surface, diffusion coefficients, radial distribution!
+!      to the surface, diffusion coefficients, radial distribution
 !      functions and picks example structures for further calculations
 !      like core level shifts or partial charges.
 !    Part of VASP4CLINT
@@ -24,7 +24,7 @@ real(kind=8)::act_num(3)
 character(len=120)::a120
 character(len=220)::a220
 character(len=1)::atest
-character(len=60)::filename,roundname
+character(len=60)::filename,roundname,track_name
 character(len=32)::arg,cdum,adum
 character(len=2)::cls_element
 integer::slice_size,frame_round_first,frame_round_last,cls_elem_ind
@@ -46,12 +46,16 @@ real(kind=8)::slice_step
 real(kind=8),allocatable::z_dens(:,:),z_dens_tot(:)
 real(kind=8)::zlo,zhi,zdiff,zstep  ! borders of z-density bins 
 character(len=2),allocatable::at_names(:)  ! the element symbols
+character(len=5),allocatable::track_list_read(:)  ! the indices of atoms to be tracked
+integer,allocatable::track_list(:)  ! the indices of atoms to be tracked, as integer
+integer::track_num   ! the number of atoms to be tracked
 logical::write_traj,read_dt
 logical::calc_rdf,calc_diff,diff_2d
 logical::use_reaxff,el_present
 logical::surf_tension
 logical::skip_xdat
 logical::eval_stat(10)
+logical::track_atoms 
 real(kind=8)::rdf_binsize,rdf_range
 real(kind=8),allocatable::rdf_plot(:,:,:)
 real(kind=8),allocatable::neighnum(:,:,:)
@@ -80,6 +84,10 @@ write(*,*) "     here, the box dimensions must be given separately in 'box_dims.
 write(*,*) "     with the format 'xlen  ylen  zlen' (one line)"
 write(*,*) " -write_traj : The file 'trajectory.xyz' containing all frames of XDATCAR"
 write(*,*) "     shall be written during the analysis."
+write(*,*) " -track_atoms=[list of numbers] : Write time-dependent positions of chosen"
+write(*,*) "     atoms to file. Example: track_atoms=1,78,178"
+write(*,*) " -timestep=[value] : For atom tracking ordiffusion calculations, the time step"
+write(*,*) "     in fs (take longer step if not every step was written during dynamics!)"
 write(*,*) " -dens_bins=[number] : Number of bins for element densities (default: 501)"
 write(*,*) " -rdf : The radial distribution functions of the second component around "
 write(*,*) "     the first shall be calculated. Then, also the total number of neighbors "
@@ -108,8 +116,6 @@ write(*,*) " -diffusion : calculates the diffusion coefficient, for each element
 write(*,*) "     separately, via the mean square displacement (MSD)."
 write(*,*) " -diff_2d : calculates the 2D-diffusion coefficient along x and y, for each element"
 write(*,*) "     in the slab separately, via the mean square displacement (MSD)."
-write(*,*) " -timestep=[value] : For diffusion calculations, the time step in fs (consider"
-write(*,*) "     a longer step if not every step was written during dynamics!)"
 
 use_reaxff = .false.
 do i = 1, command_argument_count()
@@ -144,7 +150,33 @@ do i = 1, command_argument_count()
    end if
 end do
 
-
+!
+!    Track the time-dependent positions of one or several atoms, given
+!    by their indices/numbers in the system
+!    Up to 50 atoms can be chosen
+!
+track_atoms=.false.
+allocate(track_list_read(50))
+track_list_read="XXXXX"
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:13))  .eq. "-track_atoms=") then
+      read(arg(14:),*,iostat=readstat) track_list_read
+      track_atoms=.true.
+   end if
+end do
+allocate(track_list(50))
+track_list=0
+track_num=0
+do i=1,50
+   if (track_list_read(i) .eq. "XXXXX") exit
+   read(track_list_read(i),*,iostat=readstat) track_list(i)
+   if (readstat .ne. 0) then
+      write(*,*) "The format of given atom indices in -track_atoms is wrong!"
+      stop
+   end if        
+   track_num=track_num+1
+end do
 !
 !    Look if Radial Distribution functions shall be calculated 
 !
@@ -297,19 +329,23 @@ do i = 1, command_argument_count()
    end if
 end do
 
+!
+!    Read in the time step for plot of time-dependent atom positions 
+!    or calculation of diffusion coefficients
+!
+read_dt=.false.
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:10))  .eq. "-timestep=") then
+      read_dt = .true.
+      read(arg(11:),*) time_step
+      write(*,*) "The time step shall be:",time_step," fs."
+   end if
+end do
 
 if (calc_diff) then
-   read_dt=.false.
-   do i = 1, command_argument_count()
-      call get_command_argument(i, arg)
-      if (trim(arg(1:10))  .eq. "-timestep=") then
-         read_dt = .true.
-         read(arg(11:),*) time_step
-         write(*,*) "The time step shall be:",time_step," fs."
-      end if
-   end do
    if (.not. read_dt) then
-      stop "Please set a time step with the -timestep=... flag!"
+      stop "Please set for diffusion a time step with the -timestep=... flag!"
    end if
 end if        
 
@@ -689,6 +725,49 @@ if (write_traj) then
    write(*,*)
 end if
 !
+!    Write time-dependent positions of selected atoms to files, one file
+!    for each selected atom!
+!
+if (track_atoms) then
+   write(*,*) 
+   write(*,*) "Print time-dependent coordinates of chosen atoms to files..." 
+      
+   do i=1,track_num
+      if (track_list(i) .le. 9) then
+         write(track_name,'(a,i1,a)') "track_atom",track_list(i),".dat"
+      else if (track_list(i) .le. 99) then
+         write(track_name,'(a,i2,a)') "track_atom",track_list(i),".dat"
+      else if (track_list(i) .le. 999) then
+         write(track_name,'(a,i3,a)') "track_atom",track_list(i),".dat"
+      else if (track_list(i) .le. 9999) then
+         write(track_name,'(a,i4,a)') "track_atom",track_list(i),".dat"
+      else 
+         write(track_name,'(a,i5,a)') "track_atom",track_list(i),".dat"
+      end if  
+      write(*,'(a,i5,a,a,a)') "  * Track atom ",track_list(i)," (",trim(track_name),") ..."   
+      open(unit=86,file=track_name,status="replace")
+      write(86,'(a,i5)') " # In this file, the time-dependent position of atom ",i
+      write(86,*) "# is tracked, all coordinates are in Angstroms."
+      if (read_dt) then
+         write(86,*) "# time step (fs)            x-coordinate              y-coordinate     &
+              &         z-coordinate"
+      else        
+         write(86,*) "# frame No.                 x-coordinate              y-coordinate     &
+              &         z-coordinate"
+      end if
+      do j=1,nframes
+         if (read_dt) then
+            write(86,*) time_step*j,xyz(:,track_list(i),j)
+         else 
+            write(86,*) j,xyz(:,track_list(i),j)
+         end if        
+      end do
+      close(86)  
+   end do
+   write(*,*) " completed!"
+   write(*,*)
+end if
+!
 !    Calculate the RDFs of all elements if desired 
 !
 if (calc_rdf) then
@@ -980,7 +1059,6 @@ if (nelems .gt. 1) then
    write(39,*) int_side(1,1)/(tot_side(1))*100d0
    write(39,'(a,f14.8,a,f14.8,a)') "# Second element, below z=",z_min_lower2, &
                & " A and above z=",z_min_upper2," A (%):"
-   write(*,*) int_side(2,1),(tot_side(2))
    write(39,*) int_side(2,1)/(tot_side(2))*100d0
    if (nelems .eq. 3) then
       write(39,'(a,f14.8,a,f14.8,a)') "# Third element, below z=",z_min_lower1, &

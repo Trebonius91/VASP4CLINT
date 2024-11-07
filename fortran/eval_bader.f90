@@ -252,6 +252,8 @@ do i=1,el_num
       charge_ref(i)=8.0d0
    else if (el_names(i) .eq. "Rh") then
       charge_ref(i)=9.0d0
+   else if (el_names(i) .eq. "Pd") then
+      charge_ref(i)=10.0d0
    else if (el_names(i) .eq. "Ag") then
       charge_ref(i)=11.0d0
    else if (el_names(i) .eq. "Cd") then
