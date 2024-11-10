@@ -48,6 +48,8 @@ Currently included are:
  - **mlff_select** : Selects basis functions for a VASP machine learning force field from given ML_AB files
  - **manage_cls** : Prepares and evaluates core level shift calculations for many atoms in a system
  - **modify_xdatcar** : Modify XDATCAR trajectory files: shifts, multiplications, writing of xyz files
+ - **rdf_pca** : Calculates the weight of chosen components in a time-dependent radial distribution function given from td_rdf
  - **split_freq** : Splits a large frequency calculation into arbitrary many parts and combine the results after finishing
+ - **td_rdf** : Calculates time-dependent radial-distribution functions from a XDATCAR trajectory
  - **partial_dos** : Extract the partial density of states for certain atoms, elements or orbitals from a DOSCAR file
   
