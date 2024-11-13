@@ -21,7 +21,7 @@ of element atoms representing the overall composition
 is placed randomically in a regular cubic grid.
 
 The script must be called with a number of command line parameters.
- -elnum=[number] : The number of different elements in the system (max: 3)
+ -elnum=[number] : The number of different elements in the system (max: 4)
  -unit_num=[number] : Number of atoms in the grid along x/y axes
  -el_symbols=[list] : List of element symbols, must agree with elnum
  -natoms=[list] : List of number of atoms per element given abive
@@ -32,7 +32,7 @@ The following arguments are optional and have default values
  -z_shift=[value] : Shift of the system along x (default: 0 Ang.)
  -x_shift=[value] : Shift of the system along x (default: 0 Ang.)
  -y_shift=[value] : Shift of the system along x (default: 0 Ang.)
- -unit_len=[value]: Distance between two atoms (defaut: 2.54 Anf.)
+ -unit_len=[value]: Distance between two atoms (defaut: 2.54 Ang.)
 
 Example: build_scalms.py -elnum=2 -unit_num=5 -el_symbols=Ga,Pt 
                  -natoms=171,9 -zvac=25.0
@@ -84,15 +84,15 @@ for arg in sys.argv:
          unit_len=float(actval) 
          
 if elnum <= 0:
-   print("At least one element must be given! (elnum>0)")
+   print("At least one element must be given! (elnum > 0)")
    sys.exit(1)
 
-if elnum >= 4:
-   print("No more than three elements can be given! (elnum<4)")
+if elnum >= 5:
+   print("No more than four elements can be given! (elnum < 5)")
    sys.exit(1)
 
 if unit_num <= 0:
-   print("At least one unit must be given! (unit_num>0)")
+   print("At least one unit must be given! (unit_num > 0)")
    sys.exit(1)
 
 if len(el_sym_list) != elnum:
@@ -126,6 +126,10 @@ if (elnum > 2):
    el3=el_sym_list[2]
    natoms3=int(el_num_list[2])
    natoms=natoms1+natoms2+natoms3
+if (elnum > 3):
+   el4=el_sym_list[3]
+   natoms4=int(el_num_list[3])
+   natoms=natoms1+natoms2+natoms3+natoms4
 
 
 print(" - Total number of atoms:                    ",str(natoms))
@@ -134,6 +138,8 @@ if elnum > 1:
    print(" - Element 2:                                ",str(el2), "  (",str(natoms2)," atoms)")
 if elnum > 2:
    print(" - Element 3:                                ",str(el3), "  (",str(natoms3)," atoms)")
+if elnum > 3:
+   print(" - Element 4:                                ",str(el4), "  (",str(natoms4)," atoms)")
 
 
 #
@@ -170,12 +176,16 @@ if elnum > 1:
 if elnum > 2:
    at2_frac = float(natoms1+natoms2)/float(natoms)
    at3_xyz = np.zeros((3,natoms3))  
+if elnum > 3:
+   at3_frac = float(natoms1+natoms2+natoms3)/float(natoms)
+   at4_xyz = np.zeros((3,natoms4))
    
 
 done = False
 at1_act = 0
 at2_act = 0
 at3_act = 0
+at4_act = 0
 for i in range (z_layers):  # z axis
    for j in range (unit_num):  # x-axis
       for k in range (unit_num): # y-axis
@@ -282,6 +292,108 @@ for i in range (z_layers):  # z axis
                      at2_xyz[0][at2_act-1] = pos_act[0]
                      at2_xyz[1][at2_act-1] = pos_act[1]
                      at2_xyz[2][at2_act-1] = pos_act[2]
+         elif (elnum == 4):
+            if randnum <= at1_frac:
+               at1_act = at1_act + 1
+               if at1_act <= natoms1:
+                  at1_xyz[0][at1_act-1] = pos_act[0]
+                  at1_xyz[1][at1_act-1] = pos_act[1]
+                  at1_xyz[2][at1_act-1] = pos_act[2]
+               else:
+                  if at4_act < natoms4:
+                     at4_act = at4_act + 1
+                     at1_act = at1_act - 1
+                     at4_xyz[0][at4_act-1] = pos_act[0]
+                     at4_xyz[1][at4_act-1] = pos_act[1]
+                     at4_xyz[2][at4_act-1] = pos_act[2]
+                  elif at3_act < natoms3:
+                     at3_act = at3_act + 1
+                     at1_act = at1_act - 1
+                     at3_xyz[0][at3_act-1] = pos_act[0]
+                     at3_xyz[1][at3_act-1] = pos_act[1]
+                     at3_xyz[2][at3_act-1] = pos_act[2]
+                  else:
+                     at2_act = at2_act + 1
+                     at1_act = at1_act - 1
+                     at2_xyz[0][at2_act-1] = pos_act[0]
+                     at2_xyz[1][at2_act-1] = pos_act[1]
+                     at2_xyz[2][at2_act-1] = pos_act[2]
+            elif randnum <= at2_frac:
+               at2_act = at2_act + 1
+               if at2_act <= natoms2:
+                  at2_xyz[0][at2_act-1] = pos_act[0]
+                  at2_xyz[1][at2_act-1] = pos_act[1]
+                  at2_xyz[2][at2_act-1] = pos_act[2]
+               else:
+                  if at1_act < natoms1:
+                     at1_act = at1_act + 1
+                     at2_act = at2_act - 1
+                     at1_xyz[0][at1_act-1] = pos_act[0]
+                     at1_xyz[1][at1_act-1] = pos_act[1]
+                     at1_xyz[2][at1_act-1] = pos_act[2]
+                  elif at3_act < natoms3:
+                     at3_act = at3_act + 1
+                     at1_act = at1_act - 1
+                     at3_xyz[0][at3_act-1] = pos_act[0]
+                     at3_xyz[1][at3_act-1] = pos_act[1]
+                     at3_xyz[2][at3_act-1] = pos_act[2]
+                  else:
+                     at4_act = at4_act + 1
+                     at2_act = at2_act - 1
+                     at4_xyz[0][at4_act-1] = pos_act[0]
+                     at4_xyz[1][at4_act-1] = pos_act[1]
+                     at4_xyz[2][at4_act-1] = pos_act[2]
+            elif randnum <= at3_frac:
+               at3_act = at3_act + 1
+               if at3_act <= natoms3:
+                  at3_xyz[0][at3_act-1] = pos_act[0]
+                  at3_xyz[1][at3_act-1] = pos_act[1]
+                  at3_xyz[2][at3_act-1] = pos_act[2]
+               else:
+                  if at1_act < natoms1:
+                     at1_act = at1_act + 1
+                     at3_act = at3_act - 1
+                     at1_xyz[0][at1_act-1] = pos_act[0]
+                     at1_xyz[1][at1_act-1] = pos_act[1]
+                     at1_xyz[2][at1_act-1] = pos_act[2]
+                  elif at2_act < natoms2:
+                     at2_act = at2_act + 1
+                     at3_act = at3_act - 1
+                     at2_xyz[0][at2_act-1] = pos_act[0]
+                     at2_xyz[1][at2_act-1] = pos_act[1]
+                     at2_xyz[2][at2_act-1] = pos_act[2]
+                  else:
+                     at4_act = at4_act + 1
+                     at3_act = at3_act - 1
+                     at4_xyz[0][at4_act-1] = pos_act[0]
+                     at4_xyz[1][at4_act-1] = pos_act[1]
+                     at4_xyz[2][at4_act-1] = pos_act[2]
+            else:
+               at4_act = at4_act + 1
+               if at4_act <= natoms4:
+                  at4_xyz[0][at4_act-1] = pos_act[0]
+                  at4_xyz[1][at4_act-1] = pos_act[1]
+                  at4_xyz[2][at4_act-1] = pos_act[2]
+               else:
+                  if at1_act < natoms1:
+                     at1_act = at1_act + 1
+                     at4_act = at4_act - 1
+                     at1_xyz[0][at1_act-1] = pos_act[0]
+                     at1_xyz[1][at1_act-1] = pos_act[1]
+                     at1_xyz[2][at1_act-1] = pos_act[2]
+                  elif at2_act < natoms2:
+                     at2_act = at2_act + 1
+                     at4_act = at4_act - 1
+                     at2_xyz[0][at2_act-1] = pos_act[0]
+                     at2_xyz[1][at2_act-1] = pos_act[1]
+                     at2_xyz[2][at2_act-1] = pos_act[2]
+                  else:
+                     at3_act = at3_act + 1
+                     at4_act = at4_act - 1
+                     at3_xyz[0][at3_act-1] = pos_act[0]
+                     at3_xyz[1][at3_act-1] = pos_act[1]
+                     at3_xyz[2][at3_act-1] = pos_act[2]
+                     
 
 
 
@@ -304,6 +416,8 @@ with open("POSCAR","w") as f:
       print("SCALMS system: " + el1 + str(natoms1) + el2 + str(natoms2)) 
    if elnum == 3:
       print("SCALMS system: " + el1 + str(natoms1) + el2 + str(natoms2) + el3 +str(natoms3)) 
+   if elnum == 4:
+      print("SCALMS system: " + el1 + str(natoms1) + el2 + str(natoms2) + el3 +str(natoms3) + el4 +str(natoms4))
       
    print(" 1 ")
    print("  " + str(xlen) + "  0.0   0.0")
@@ -312,13 +426,16 @@ with open("POSCAR","w") as f:
    if elnum == 1:
       print("  " + el1)
       print("  " + str(natoms1))
-
    if elnum == 2:
       print("  " + el1 + "  " + el2)
       print("  " + str(natoms1) + "  " + str(natoms2))
    elif elnum == 3:
       print("  " + el1 + "  " + el2 + "  " + el3) 
       print("  " + str(natoms1) + "  " + str(natoms2) +  "  " + str(natoms3)) 
+   elif elnum == 4:
+      print("  " + el1 + "  " + el2 + "  " + el3 + "  " + el4)
+      print("  " + str(natoms1) + "  " + str(natoms2) +  "  " + str(natoms3) +  "  " + str(natoms4))
+
 
    print("Cartesian")
    for i in range(natoms1):
@@ -329,6 +446,10 @@ with open("POSCAR","w") as f:
    if elnum > 2:
       for i in range(natoms3):
          print("  " + str(at3_xyz[0][i]) + " " + str(at3_xyz[1][i]) + " " + str(at3_xyz[2][i]))
+   if elnum > 3:
+      for i in range(natoms4):
+         print("  " + str(at4_xyz[0][i]) + " " + str(at4_xyz[1][i]) + " " + str(at4_xyz[2][i]))
+
 
 sys.stdout = original_stdout
 

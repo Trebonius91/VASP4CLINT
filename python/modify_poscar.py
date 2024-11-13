@@ -29,6 +29,8 @@ print('''
      it to cartesian coordinates
   -cart2frac : The POSCAR is in cartesian coordinates, convert it to
      fractional coordinates 
+  -map2unit : Remove all image flags (i.e., direct coordinates larger 1
+     or smaller 0) and shift all atoms to the central unit cell
   -freeze=elems : Set all atoms belonging to a list of elements to F F F,
      for example for frequency calculations, where a surface is kept fix.
      Example: freeze=Pt,O (Pt and O atoms will be kept fix) 
@@ -59,6 +61,7 @@ cart2frac=False
 writexyz=False
 bottom=False
 select_el=False
+map2unit=False
 
 # Read in the command line arguments
 for arg in sys.argv:
@@ -91,7 +94,8 @@ for arg in sys.argv:
          cart2frac=True
       if param == "-writexyz":
          writexyz=True
-
+      if param == "-map2unit":
+         map2unit=True 
 
 if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac) 
     and (not writexyz) and (not freeze) and (not bottom)):
@@ -206,7 +210,11 @@ if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2fra
 # For elements selected for shift or other operations: generate boolean mask with 
 #  indices of atoms that are one of the chosen elements
 
-select_mask=True
+select_mask=[]
+for name in names:
+   select_mask.append(True)
+
+
 if select_el:
    select_mask=[] 
    for name in names:
@@ -264,6 +272,42 @@ def trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec):
       
    return xyz_frac
 
+# 0: MAP ALL ATOMS TO CENTRAL UNI CELL ################
+if map2unit:
+   print(" Map all atoms to the central unit cell, i.e., remove image flags ...") 
+
+   if selective:
+      select_new=[]
+
+   # Perform the actual shifting of the coordinates
+   xyz_new=np.zeros((natoms,3))
+   # If cartesian coordinates: translate the coordinates first to direct, then 
+   #  perform the shift, and finally translate it back to cartesian!
+   if cartesian:
+      xyz = trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec)
+      for i in range(natoms):
+         for j in range(3):
+            xyz_new[i][j] = xyz[i][j]
+            while xyz_new[i][j] < 0.0:
+               xyz_new[i][j] = xyz_new[i][j] + 1.0
+            while xyz_new[i][j] > 1.0:
+               xyz_new[i][j] = xyz_new[i][j] - 1.0
+         if selective:
+            select_new.append(coord_select[i])
+      xyz_new = trans_frac2cart(xyz_new,natoms,a_vec,b_vec,c_vec)
+      print(xyz_new)
+   else:
+      for i in range(natoms):
+         for j in range(3):
+            xyz_new[i][j] = xyz[i][j] 
+            while xyz_new[i][j] < 0.0:
+               xyz_new[i][j] = xyz_new[i][j] + 1.0
+            while xyz_new[i][j] > 1.0:
+               xyz_new[i][j] = xyz_new[i][j] - 1.0
+
+         if selective:
+            select_new.append(coord_select[i])
+   print(" done!\n")
 
 # A: SHIFT OF UNIT CELL ###############################
 if shift_job:
@@ -292,6 +336,11 @@ if shift_job:
    if selective:
       select_new=[]
 
+   # If the unit cell was mapped, used the updated cell
+   if map2unit:
+      xyz=xyz_new
+
+
    # Perform the actual shifting of the coordinates
    xyz_new=np.zeros((natoms,3))
    # If cartesian coordinates: translate the coordinates first to direct, then 
@@ -304,9 +353,9 @@ if shift_job:
                xyz_new[i][j] = xyz[i][j] + shift_vec[j]
             else:  
                xyz_new[i][j] = xyz[i][j] 
-            if xyz[i][j] < 0.0:
+            if xyz_new[i][j] < 0.0:
                xyz_new[i][j] = xyz_new[i][j] + 1.0
-            if xyz[i][j] > 1.0:
+            if xyz_new[i][j] > 1.0:
                xyz_new[i][j] = xyz_new[i][j] - 1.0
          if selective:
             select_new.append(coord_select[i])
@@ -319,9 +368,9 @@ if shift_job:
                xyz_new[i][j] = xyz[i][j] + shift_vec[j]
             else:   
                xyz_new[i][j] = xyz[i][j] 
-            if xyz[i][j] < 0.0:
+            if xyz_new[i][j] < 0.0:
                xyz_new[i][j] = xyz_new[i][j] + 1.0
-            if xyz[i][j] > 1.0:
+            if xyz_new[i][j] > 1.0:
                xyz_new[i][j] = xyz_new[i][j] - 1.0 
 
          if selective:
@@ -337,7 +386,7 @@ if multiply_job:
       ele = int(multiply_list[i])
       mult_vec[i] = ele # adding the element
 #   If the previous job (shift of unit cell) was already done, overwrite the xyz array   
-   if shift_job:
+   if shift_job or map2unit:
       xyz=xyz_new
 
 #   If a phase transition shall be studied, hold the lower half of the multiplied cell
@@ -484,7 +533,7 @@ if frac2cart:
       print(" The POSCAR file already has cartesian coordinates!")
       exit(1)
 #  If one of the previous jobs were done, overwrite the xyz array
-   if shift_job or multiply_job:
+   if shift_job or multiply_job or map2unit:
       xyz=xyz_new 
 
    xyz_new=trans_frac2cart(xyz,natoms,a_vec,b_vec,c_vec)
@@ -504,7 +553,7 @@ if cart2frac:
       print(" The POSCAR file already has direct coordinates!")
       exit(1)    
 #  If one of the previous jobs were done, overwrite the xyz array
-   if shift_job or multiply_job or frac2cart:
+   if shift_job or multiply_job or frac2cart or map2unit:
       xyz=xyz_new
 
 
@@ -523,7 +572,7 @@ if cart2frac:
 if writexyz:
    print(" Write structure to xyz file poscar_mod.xyz...")
 #  If no other job has been done before, copy xyz directly to xyz_new
-   if not shift_job and not multiply_job and not frac2cart and not cart2frac:
+   if not shift_job and not multiply_job and not frac2cart and not cart2frac and not map2unit:
       xyz_new=xyz 
 #  If the structure is in direct coordinates, translate it first to cartesian!
    if (not cartesian):
