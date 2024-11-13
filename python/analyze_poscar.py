@@ -277,9 +277,9 @@ if angle_job:
    #  coordinates (correct for image flags)
 
    pos_ref=np.zeros(3)
-   pos_ref[0]=xyz_frac[int(atom_list[0])][0]
-   pos_ref[1]=xyz_frac[int(atom_list[0])][1]
-   pos_ref[2]=xyz_frac[int(atom_list[0])][2]
+   pos_ref[0]=xyz_frac[int(atom_list[0])-1][0]
+   pos_ref[1]=xyz_frac[int(atom_list[0])-1][1]
+   pos_ref[2]=xyz_frac[int(atom_list[0])-1][2]
 
    for index in atom_list:
       for i in range(3):
@@ -296,9 +296,9 @@ if angle_job:
    i=0
    for index in atom_list:
       index=int(index)
-      points[i][0]=xyz[index][0]
-      points[i][1]=xyz[index][1]
-      points[i][2]=xyz[index][2]
+      points[i][0]=xyz[index-1][0]
+      points[i][1]=xyz[index-1][1]
+      points[i][2]=xyz[index-1][2]
       i=i+1
 
    normal_vector = fit_plane(points)
