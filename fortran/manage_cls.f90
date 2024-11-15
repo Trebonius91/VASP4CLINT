@@ -20,6 +20,7 @@ logical::cls_elements,el_all
 logical::mode_eval,mode_setup
 logical::use_slurm
 logical::coord_direct
+logical::no_fermi
 integer::quantum_n,quantum_l
 integer,allocatable::list_active(:)
 character(len=2),allocatable::el_active(:)
@@ -71,6 +72,8 @@ write(*,*) " -plot_points=[number] : Number of plot points in the spectrum"
 write(*,*) "   (default: 1000)"
 write(*,*) " -gauss_width=[value]: Exponential prefactor of the Gaussian "
 write(*,*) "   applied to broaden the lines of the spectrum (default 40.0)"
+write(*,*) " -no_fermi : Deactivates the default correction of core level"
+write(*,*) "   energies by the Fermi level of the respective calculation."
 
 
 mode_setup=.false.
@@ -209,9 +212,18 @@ if (mode_eval) then
       write(*,*) " - The width of line broadening Gaussians has been set to ",gauss_width
    end if
 end if
-
-
-
+!
+!    If the correction by Fermi level shall be deactivated
+!
+do i = 1, command_argument_count()
+   call get_command_argument(i, arg)
+   if (trim(arg(1:9))  .eq. "-no_fermi") then
+      no_fermi = .true.
+      write(*,*)
+      write(*,*) "The core level energies will not be corrected for the Fermi level!"
+      write(*,*)
+   end if
+end do
 !
 !    Open the POSCAR file and read in its content
 !    This is needed for both modes!
@@ -644,7 +656,11 @@ if (mode_eval) then
 !     Calculate the current final state energy, in the same scale as experiment
 !
 
-      fs_val(i)=-(fs_val(i)-e_fermi)
+      if (no_fermi) then
+         fs_val(i)=-fs_val(i)
+      else         
+         fs_val(i)=-(fs_val(i)-e_fermi)
+      end if
 
       call chdir("..")
    end do
@@ -739,8 +755,11 @@ if (mode_eval) then
 !
 !     Calculate the current initial state energy, in the same scale as experiment
 !
-
-      is_val(i)=-(is_val(i)-e_fermi)
+      if (no_fermi) then
+         is_val(i)=-is_val(i)
+      else     
+         is_val(i)=-(is_val(i)-e_fermi)
+      end if
 
       close(47)
    end do
