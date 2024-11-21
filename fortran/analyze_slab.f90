@@ -25,7 +25,7 @@ character(len=120)::a120
 character(len=220)::a220
 character(len=1)::atest
 character(len=60)::filename,roundname,track_name
-character(len=32)::arg,cdum,adum
+character(len=150)::arg,cdum,adum
 character(len=2)::cls_element
 integer::slice_size,frame_round_first,frame_round_last,cls_elem_ind
 integer::atom_first,atom_last
