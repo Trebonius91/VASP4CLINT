@@ -39,6 +39,7 @@ real(kind=8),allocatable::min_pos(:)
 real(kind=8),allocatable::z_vals(:)
 real(kind=8),allocatable::int_side(:,:),tot_side(:)
 real(kind=8)::z_min_lower1,z_min_lower2,z_min_upper1,z_min_upper2
+real(kind=8)::scale_dum
 !  RDF calculation
 integer::ig,ngr,npart1,npart2
 real(kind=8)::nid,r_act,rho,vb
@@ -56,6 +57,7 @@ logical::surf_tension
 logical::skip_xdat
 logical::eval_stat(10)
 logical::track_atoms 
+logical::npt_format
 real(kind=8)::rdf_binsize,rdf_range
 real(kind=8),allocatable::rdf_plot(:,:,:)
 real(kind=8),allocatable::neighnum(:,:,:)
@@ -537,11 +539,41 @@ else
       el_names(i)=el_names_read(i)
    end do
    read(14,*) el_nums
-
+   close(14)
+!
+!     Number of atoms in the slab
+!
+   natoms = sum(el_nums)
+!
+!    Check if the XDATCAR has the format of NpT trajectory with the 
+!    full header for each frame, then, skip the headers in each read in
+!
+   open(unit=14,file="XDATCAR",status="old")
+   do i=1,8
+      read(14,'(a)') cdum
+   end do   
+   do i=1,natoms
+      read(14,'(a)') cdum
+   end do
+   read(14,*)
+   read(14,*) scale_dum
+   if (abs(scale_dum-factor) .lt. 1E-10) then
+      npt_format=.true.
+      write(*,*) "The XDATCAR file has the format of a NpT trajectory."
+   else
+      npt_format=.false.
+   end if        
+   close(14)
+!
+!    Open the XDATCAR again for a full 
+!
+   open(unit=14,file="XDATCAR",status="old")
+   do i=1,7
+      read(14,'(a)') cdum
+   end do
 !
 !    Define the element symbols for all atoms in the system
 !
-   natoms = sum(el_nums)
    allocate(at_names(natoms))
 
    counter = 1
@@ -551,8 +583,11 @@ else
          counter = counter +1
       end do
    end do
-
-   nframes = (xdat_lines - 7)/(natoms+1)
+   if (npt_format) then
+      nframes = (xdat_lines - 7)/(natoms+8)
+   else        
+      nframes = (xdat_lines - 7)/(natoms+1)
+   end if
 !
 !    If the XDATCAR file shall not be read in, skip the rest
 !
@@ -581,6 +616,11 @@ else
          end if
       end do
       read(14,*)
+      if (npt_format) then
+         do j=1,7
+            read(14,*)
+         end do
+      end if        
       do j=1,natoms 
          read(14,'(a)') a120
          read(a120,*,iostat=readstat) act_num(:)

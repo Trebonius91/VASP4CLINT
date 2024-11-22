@@ -209,7 +209,6 @@ do i=1,nelems
    el_names(i)=el_names_read(i)
 end do
 read(14,*) el_nums
-
 !
 !    Define the element symbols for all atoms in the system
 !
@@ -248,6 +247,7 @@ if (npt) then
 else
    nframes = (xdat_lines - 7)/(natoms+1)
 end if
+!write(*,*) xdat_lines,natoms,nframes
 !
 !    If the read frequency is larger than 1, divide the number of 
 !       frames by it!
@@ -622,6 +622,7 @@ else
             do j=1,nelems
                write(34,'(i6,a)',advance="no") el_nums(j)," "
             end do
+            write(34,*)
          else if (i .eq. frame_first) then
             write(34,*) "NVT Trajectory written by modify_xdatcar"
             write(34,*) factor
@@ -635,6 +636,7 @@ else
             do j=1,nelems
                write(34,'(i6,a)',advance="no") el_nums(j)," "
             end do
+            write(34,*)
          end if
  
          write(34,*) "Direct configuration=  ",i
