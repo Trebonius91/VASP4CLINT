@@ -5,7 +5,7 @@
 #      coordinate directions, convert it from frac 2 cart and the 
 #      other way around, write it to a xyz file
 #    Part of VASP4CLINT
-#     Julien Steffen, 2023 (julien.steffen@fau.de)
+#     Julien Steffen, 2024 (julien.steffen@fau.de)
 #
 
 import sys
@@ -13,6 +13,7 @@ import os
 import re
 import numpy as np
 from numpy import linalg as LA
+from scipy.spatial import distance_matrix
 
 print('''
  This script takes a POSCAR file in direct or cartesian coordinates 
@@ -36,11 +37,17 @@ print('''
      Example: freeze=Pt,O (Pt and O atoms will be kept fix) 
   -select_el=elems : Select all elements whose atoms shall be modified,
      for example with a shift command. Same syntax as for freeze"
+  -insert_struc=a,b,c : Insert the structure given by POSCAR_insert into
+     the current POSCAR. The center of mass of the inserted structure is 
+     moved to the position given by a,b,c in direct coordinates.
   -bottom=value : Set all atoms below the z-coordinate 'value' to F F F,
      for example for optimizations on surfaces, where the lower two layers
      are kept fix. Depending on the input format of the POSCAR, the value
      must be given in direct or cartesian coordinates.
      Example: bottom=3.5 (atoms below 3.5 A are frozen, cartesian)
+  -remove_dist=value : The distance (in Angstroms) below which all atoms 
+     in the POSCAR are removed, which are nearer to one of the atoms in 
+     the POSCAR_insert structure (only for insert_struc): default: 2.5 Ang
   -phasetrans=axis : a unitcell for a phase transition sampling will be 
      build. Must be done in combination with -multiply, for 'axis' either
      a, b or c must be given (as letter). Along the given axis, the 
@@ -60,8 +67,10 @@ freeze=False
 cart2frac=False
 writexyz=False
 bottom=False
+insert=False
 select_el=False
 map2unit=False
+dist_remove=2.5
 
 # Read in the command line arguments
 for arg in sys.argv:
@@ -79,9 +88,14 @@ for arg in sys.argv:
       if param == "-freeze":
          freeze_list=actval.split(",")
          freeze=True
+      if param == "-insert_struc":
+         insert_list=actval.split(",")
+         insert=True
       if param == "-select_el":
          select_list=actval.split(",")
          select_el=True
+      if param == "-remove_dist":
+         dist_remove=float(actval)
       if param == "-bottom":
          freeze_bottom=float(actval)
          bottom=True
@@ -98,7 +112,7 @@ for arg in sys.argv:
          map2unit=True 
 
 if ((not multiply_job) and (not shift_job) and (not frac2cart) and (not cart2frac) 
-    and (not writexyz) and (not freeze) and (not bottom)):
+    and (not writexyz) and (not freeze) and (not bottom) and(not insert)):
    print("Please give a least one valid keyword!")
    sys.exit(1)
 
@@ -271,6 +285,10 @@ def trans_cart2frac(xyz,natoms,a_vec,b_vec,c_vec):
 
       
    return xyz_frac
+
+# If insert is activated, map the atoms to the central unit cell
+if insert:
+   map2unit=True
 
 # 0: MAP ALL ATOMS TO CENTRAL UNI CELL ################
 if map2unit:
@@ -526,6 +544,245 @@ if multiply_job:
    if selective:
       coord_select=select_new
    print(" done!\n")
+
+# C: Insert a second structure into the coordinates of POSCAR
+if insert:
+   print(" Insert a structure from file POSCAR_insert into POSCAR...")
+   
+# Read in the POSCAR_insert file
+   poscar_name="POSCAR_insert"
+
+   poscar_insert = open(poscar_name,"r")
+
+# array for selective dynamics specifiers
+   coord_select= []
+
+   cartesian_insert=False
+   selective_insert=False
+   with poscar_insert as infile:
+      line = infile.readline()
+      line = line.rstrip("\n")
+      poscar_comm = line # the comment line
+      line = infile.readline().rstrip("\n")
+      sys_scale_insert = float(line)  # the global lattice scaling factor
+   # read in the lattice vectors a,b and c
+
+      a_vec_insert=np.zeros(3)
+      b_vec_insert=np.zeros(3)
+      c_vec_insert=np.zeros(3)
+
+      line = infile.readline().rstrip("\n")
+      a_read = line.rstrip().split()[0:3]
+      line = infile.readline().rstrip("\n")
+      b_read = line.rstrip().split()[0:3]
+      line = infile.readline().rstrip("\n")
+      c_read = line.rstrip().split()[0:3]
+      for i in range(3):
+         a_vec_insert[i]=float(a_read[i])
+         b_vec_insert[i]=float(b_read[i])
+         c_vec_insert[i]=float(c_read[i])
+   # read in the element ordering
+      coord_vec=np.zeros(3)
+      coord_vec[0]=a_vec_insert[0]
+      coord_vec[1]=b_vec_insert[1]
+      coord_vec[2]=c_vec_insert[2]
+      line = infile.readline().rstrip("\n")
+      elements_insert = line.rstrip().split()
+      nelem_insert = len(elements_insert)
+   # read in the number of elements
+      line = infile.readline().rstrip("\n")
+      line_split = line.rstrip().split()
+
+      elem_num_insert=[]
+      natoms_insert=0
+      names_insert=[]
+      for i in range(nelem_insert):
+         elem_num_insert.append(int(line_split[i]))
+      # total number of atoms
+         natoms_insert=natoms_insert+elem_num_insert[i]
+         for j in range(elem_num_insert[i]):
+             names_insert.append(elements_insert[i])
+
+
+      natoms_insert=int(natoms_insert)
+   # read in the list of atoms
+      xyz_insert = np.zeros((natoms_insert,3))
+   # check if selective dynamics was used
+      line = infile.readline()
+      line_split = line.rstrip().split()
+      if (line_split[0] == "Selective" or line_split[0] == "selective"
+           or line_split[0] == "Select" or line_split[0] == "select"):
+         selective_insert=True
+      if selective_insert:
+         line = infile.readline().rstrip("\n")
+      line_parts = line.split()
+      if (line_parts[0] != "Direct" and line_parts[0] != "direct"
+                and line_parts[0] != " Direct" and line_parts[0] != " direct"):
+         cartesian_insert=True
+         print(" The POSCAR_insert has cartesian coordinates.")
+      else:
+         print(" The POSCAR_insert has direct coordinates.")
+
+      print(" ")
+      for i in range(natoms_insert):
+         line = infile.readline().rstrip("\n")
+         xyz_read = line.rstrip().split()[0:3]
+         if selective:
+            select_read = line.rstrip().split()[3:6]
+            coord_select_insert.append(select_read[0] + " " + select_read[1] + " " + select_read[2])
+         for j in range(3):
+            xyz_insert[i][j]=float(xyz_read[j])
+
+   # Shift all atoms of the inserted structure into the central unit cell
+   xyz_insert_new=np.zeros((natoms_insert,3))
+   # If cartesian coordinates: translate the coordinates first to direct, then 
+   #  perform the shift, and finally translate it back to cartesian!
+   if cartesian_insert:
+      xyz_insert = trans_cart2frac(xyz_insert,natoms_insert,a_vec_insert,b_vec_insert,c_vec_insert)
+      for i in range(natoms_insert):
+         for j in range(3):
+            xyz_insert_new[i][j] = xyz_insert[i][j]
+            while xyz_insert_new[i][j] < 0.0:
+               xyz_insert_new[i][j] = xyz_insert_new[i][j] + 1.0
+            while xyz_insert_new[i][j] > 1.0:
+               xyz_insert_new[i][j] = xyz_insert_new[i][j] - 1.0
+         if selective:
+            select_insert_new.append(coord_select_insert[i])
+      xyz_insert_new = trans_frac2cart(xyz_insert_new,natoms_insert,a_vec_insert,b_vec_insert,c_vec_insert)
+   else:
+      for i in range(natoms_insert):
+         for j in range(3):
+            xyz_insert_new[i][j] = xyz_insert[i][j]
+            while xyz_insert_new[i][j] < 0.0:
+               xyz_insert_new[i][j] = xyz_insert_new[i][j] + 1.0
+            while xyz_insert_new[i][j] > 1.0:
+               xyz_insert_new[i][j] = xyz_insert_new[i][j] - 1.0
+
+         if selective:
+            select_insert_new.append(coord_select_insert[i])
+   print(" done!\n")
+
+
+#  Shift the content of POSCAR_insert by the shift vector given in the command
+#  Since the shift vector is defined relative to the shape of the POSCAR in
+#  which POSCAR_insert shall be inserted, it must be translated into the 
+#  direct coordinates of POSCAR_insert!
+   shift_outer = np.zeros((1,3))
+   for i in range(3):
+      shift_outer[0][i] = float(insert_list[i])
+
+   print(shift_outer)
+#  Translate to cartesian coordinates
+   shift_cart=trans_frac2cart(shift_outer,1,a_vec,b_vec,c_vec)
+#  Translate to direct coordinates of POSCAR_insert
+   shift_insert=trans_cart2frac(shift_cart,1,a_vec_insert,b_vec_insert,c_vec_insert)
+#  If needed, translate the coordinates of the inserted structure to direct
+   if cartesian_insert:
+      xyz_insert_new = trans_cart2frac(xyz_insert_new,natoms_insert,a_vec_insert,b_vec_insert,c_vec_insert)
+
+
+#  We want to move the center of POSCAR insert, so correct to the center
+   for i in range(3):
+      shift_insert[0][i]=shift_insert[0][i]-0.5
+
+   
+#  Now shift the atoms of POSCAR_insert by the shift vector of it
+
+   for i in range(natoms_insert):
+      for j in range(3):
+         xyz_insert_new[i][j] = xyz_insert_new[i][j] + shift_insert[0][j]
+
+#  Now translate the inserted structure back to cartesian coordinates
+
+   xyz_insert_new = trans_frac2cart(xyz_insert_new,natoms_insert,a_vec_insert,b_vec_insert,c_vec_insert)
+
+#   original_stdout=sys.stdout
+#   with open("test.xyz","w") as f:
+#      sys.stdout = f
+#      print(natoms_insert)
+#      print(" System converted to xyz by modify_poscar.py")
+#      for i in range(natoms_insert):
+#         print(names_insert[i],"  ",str(xyz_insert_new[i][0]),"  ",str(xyz_insert_new[i][1]),"  ",
+#                    str(xyz_insert_new[i][2]))
+#   sys.stdout=original_stdout
+
+#  If needed, translate the large POSCAR structure to cartesian coordinates
+#  If one of the previous jobs were done, overwrite the xyz array
+   if shift_job or multiply_job or map2unit:
+      xyz=xyz_new
+
+   if not cartesian:
+      xyz=trans_frac2cart(xyz,natoms,a_vec,b_vec,c_vec)
+
+#  Now, plug the inserted structure into the POSCAR structure 
+#   Generate a distance matrix of all atoms in POSCAR_insert and POSCAR, remove all
+#   atoms in POSCAR that are below a certain threshold
+
+   dist_mat = distance_matrix(xyz,xyz_insert_new,p=2)
+
+   dist_mins = dist_mat.min(axis=1)
+ 
+   min_mask=dist_mins < dist_remove
+
+#  Finally, overwrite arrays and values for POSCAR with new numbers for inserted structure  
+   index=0
+   index2=0
+   xyz_tmp=np.zeros((natoms,3))
+   elem_num_tmp=[0]*nelem
+   natoms_tmp=0
+   names_tmp=[""]*natoms
+
+   for i in range (nelem):
+      for j in range(elem_num[i]):
+         if not min_mask[index]:
+            xyz_tmp[index2][0]=xyz[index][0]
+            xyz_tmp[index2][1]=xyz[index][1]
+            xyz_tmp[index2][2]=xyz[index][2]
+            names_tmp[index2]=names[index]
+            index2=index2+1 
+            elem_num_tmp[i]=elem_num_tmp[i]+1
+            natoms_tmp=natoms_tmp+1
+         index=index+1
+#  Now, add the elements and atom numbers of POSCAR_insert to the structure
+  
+   for i in range (nelem_insert):
+      found=False
+      for j in range (nelem):
+         if elements[j] == elements_insert[i]:
+            elem_num_tmp[j] = elem_num_tmp[j]+elem_num_insert[i]
+            found=True
+            break
+      if not found:
+         nelem=nelem+1
+         elements.append(elements_insert[i])
+         elem_num_tmp.append(elem_num_insert[i])   
+
+   print(elem_num_tmp)
+
+   natoms=natoms_tmp+natoms_insert
+   xyz_new=np.zeros((natoms,3))
+   names=[""]*natoms
+
+   index=0
+   for i in range(nelem):
+      for j in range(natoms_tmp):
+         if names_tmp[j] == elements[i]:
+            names[index]=names_tmp[j]
+            xyz_new[index][0]=xyz_tmp[j][0]
+            xyz_new[index][1]=xyz_tmp[j][1]
+            xyz_new[index][2]=xyz_tmp[j][2] 
+            index=index+1 
+      for j in range(natoms_insert):
+         if names_insert[i] == elements[i]:
+            names[index]=names_insert[j] 
+            xyz_new[index][0]=xyz_insert_new[j][0]
+            xyz_new[index][1]=xyz_insert_new[j][1]
+            xyz_new[index][2]=xyz_insert_new[j][2]  
+            index=index+1
+      elem_num[i]=elem_num_tmp[i]
+   print(natoms,natoms_tmp,natoms_insert)
+   cartesian=True
+
 # C: TRANSLATE FROM DIRECT TO CARTESIAN ###################################
 if frac2cart:
    print(" Translate struture from fractional/direct to cartesian coordinates...")   
