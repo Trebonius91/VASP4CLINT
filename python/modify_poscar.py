@@ -313,7 +313,6 @@ if map2unit:
          if selective:
             select_new.append(coord_select[i])
       xyz_new = trans_frac2cart(xyz_new,natoms,a_vec,b_vec,c_vec)
-      print(xyz_new)
    else:
       for i in range(natoms):
          for j in range(3):
@@ -623,7 +622,6 @@ if insert:
       else:
          print(" The POSCAR_insert has direct coordinates.")
 
-      print(" ")
       for i in range(natoms_insert):
          line = infile.readline().rstrip("\n")
          xyz_read = line.rstrip().split()[0:3]
@@ -671,7 +669,6 @@ if insert:
    for i in range(3):
       shift_outer[0][i] = float(insert_list[i])
 
-   print(shift_outer)
 #  Translate to cartesian coordinates
    shift_cart=trans_frac2cart(shift_outer,1,a_vec,b_vec,c_vec)
 #  Translate to direct coordinates of POSCAR_insert
@@ -695,16 +692,6 @@ if insert:
 #  Now translate the inserted structure back to cartesian coordinates
 
    xyz_insert_new = trans_frac2cart(xyz_insert_new,natoms_insert,a_vec_insert,b_vec_insert,c_vec_insert)
-
-#   original_stdout=sys.stdout
-#   with open("test.xyz","w") as f:
-#      sys.stdout = f
-#      print(natoms_insert)
-#      print(" System converted to xyz by modify_poscar.py")
-#      for i in range(natoms_insert):
-#         print(names_insert[i],"  ",str(xyz_insert_new[i][0]),"  ",str(xyz_insert_new[i][1]),"  ",
-#                    str(xyz_insert_new[i][2]))
-#   sys.stdout=original_stdout
 
 #  If needed, translate the large POSCAR structure to cartesian coordinates
 #  If one of the previous jobs were done, overwrite the xyz array
@@ -757,8 +744,6 @@ if insert:
          elements.append(elements_insert[i])
          elem_num_tmp.append(elem_num_insert[i])   
 
-   print(elem_num_tmp)
-
    natoms=natoms_tmp+natoms_insert
    xyz_new=np.zeros((natoms,3))
    names=[""]*natoms
@@ -780,10 +765,9 @@ if insert:
             xyz_new[index][2]=xyz_insert_new[j][2]  
             index=index+1
       elem_num[i]=elem_num_tmp[i]
-   print(natoms,natoms_tmp,natoms_insert)
    cartesian=True
 
-# C: TRANSLATE FROM DIRECT TO CARTESIAN ###################################
+# D: TRANSLATE FROM DIRECT TO CARTESIAN ###################################
 if frac2cart:
    print(" Translate struture from fractional/direct to cartesian coordinates...")   
    if cartesian:
@@ -803,7 +787,7 @@ if frac2cart:
 
    print(" done!\n")
   
-# D: TRANSLATE FROM CARTESIAN TO DIRECT ###################################
+# E: TRANSLATE FROM CARTESIAN TO DIRECT ###################################
 if cart2frac:
    print(" Translate struture from cartesian to fractional/direct coordinates...")
    if not cartesian:
@@ -825,7 +809,7 @@ if cart2frac:
 
    print(" done!\n")
 
-# E: WRITE XYZ FILE #######################################################
+# F: WRITE XYZ FILE #######################################################
 if writexyz:
    print(" Write structure to xyz file poscar_mod.xyz...")
 #  If no other job has been done before, copy xyz directly to xyz_new
