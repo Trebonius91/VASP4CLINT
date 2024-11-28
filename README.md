@@ -1,5 +1,5 @@
-# VASP4CLINT
-**Utility scripts and programs for VASP calculations of (liquid or solid) interface systems**
+# utils4VASP
+**Utility scripts and programs for VASP calculations of bulk and interface systems**
 
 by
 
